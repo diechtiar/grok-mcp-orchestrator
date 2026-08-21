@@ -62,6 +62,7 @@ def _optional_dir(*env_names: str) -> Path | None:
 ROOT = _default_root().resolve()
 INBOX = ROOT / "inbox"
 REGISTRY = ROOT / "registry"
+WAKE = ROOT / "wake"
 # Claude / other harness snapshots — only if explicitly configured (no host-specific default)
 USAGE_DIR = _optional_dir("PEER_BUS_USAGE_DIR", "USAGE_DIR")
 GROK_HOME = Path(os.environ.get("GROK_HOME", str(Path.home() / ".grok"))).expanduser()
@@ -79,7 +80,13 @@ ALLOW_SESSION_OVERRIDE = os.environ.get("PEER_BUS_ALLOW_SESSION_OVERRIDE", "").l
     "yes",
 }
 ALLOW_STALE_SEND = os.environ.get("PEER_BUS_ALLOW_STALE_SEND", "").lower() in {"1", "true", "yes"}
+# Optional wake after accept (never fails send). See _try_wake().
+WAKE_ENABLED = os.environ.get("PEER_BUS_WAKE", "").lower() in {"1", "true", "yes"}
+WAKE_CMD = os.environ.get("PEER_BUS_WAKE_CMD", "").strip()
+WAKE_DROP = os.environ.get("PEER_BUS_WAKE_DROP", "1").lower() in {"1", "true", "yes"}
 MAX_DISPLAY_NAME = 64
+# In-process wake callback (e.g. Claude native SendMessage). Set by host; never required.
+_WAKE_CALLBACK: Any = None
 
 
 def _now() -> str:
@@ -90,12 +97,115 @@ def _ensure_dirs() -> None:
     ROOT.mkdir(parents=True, exist_ok=True)
     INBOX.mkdir(parents=True, exist_ok=True)
     REGISTRY.mkdir(parents=True, exist_ok=True)
+    WAKE.mkdir(parents=True, exist_ok=True)
     # Best-effort tighten bus dirs (some mounts ignore mode)
-    for path in (ROOT, INBOX, REGISTRY):
+    for path in (ROOT, INBOX, REGISTRY, WAKE):
         try:
             os.chmod(path, 0o700)
         except OSError:
             pass
+
+
+def set_wake_callback(callback: Any) -> None:
+    """Register an in-process wake fn(envelope, recipient) -> None. Failures are swallowed."""
+    global _WAKE_CALLBACK
+    _WAKE_CALLBACK = callback
+
+
+def _try_wake(envelope: dict[str, Any], recipient: dict[str, Any]) -> dict[str, Any]:
+    """Best-effort peer wake after inbox accept. Never raises; never undoes acceptance."""
+    out: dict[str, Any] = {"attempted": False, "ok": None, "methods": [], "error": None}
+    if _WAKE_CALLBACK is None and not (WAKE_ENABLED and WAKE_CMD) and not WAKE_DROP:
+        return out
+    methods_ok = 0
+    methods_tried = 0
+
+    def _mark(method: str, ok: bool, err: str | None = None) -> None:
+        nonlocal methods_ok, methods_tried
+        methods_tried += 1
+        out["methods"].append({"method": method, "ok": ok, "error": err})
+        if ok:
+            methods_ok += 1
+        elif err and not out["error"]:
+            out["error"] = err
+
+    # 1) In-process callback (Claude native SendMessage when host wired it)
+    if _WAKE_CALLBACK is not None:
+        try:
+            _WAKE_CALLBACK(envelope, recipient)
+            _mark("callback", True)
+        except Exception as exc:  # noqa: BLE001 — wake must not fail send
+            _mark("callback", False, f"{type(exc).__name__}: {exc}")
+
+    # 2) Operator-supplied shell command (PEER_BUS_WAKE=1 + PEER_BUS_WAKE_CMD)
+    if WAKE_ENABLED and WAKE_CMD:
+        try:
+            import subprocess
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PEER_BUS_WAKE_MSG_ID": str(envelope.get("msg_id") or ""),
+                    "PEER_BUS_WAKE_TO_KEY": str(recipient.get("key") or ""),
+                    "PEER_BUS_WAKE_TO_ADDRESS": str(
+                        (envelope.get("to") or {}).get("address") or recipient.get("address") or ""
+                    ),
+                    "PEER_BUS_WAKE_TO_HARNESS": str(recipient.get("harness") or ""),
+                    "PEER_BUS_WAKE_FROM_ADDRESS": str(
+                        (envelope.get("from") or {}).get("address") or ""
+                    ),
+                    "PEER_BUS_WAKE_SUMMARY": str(envelope.get("summary") or "")[:200],
+                    "PEER_BUS_WAKE_PATH": str(envelope.get("_path") or ""),
+                }
+            )
+            proc = subprocess.run(
+                WAKE_CMD,
+                shell=True,
+                env=env,
+                timeout=5,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            _mark(
+                "cmd",
+                proc.returncode == 0,
+                None if proc.returncode == 0 else f"exit {proc.returncode}",
+            )
+        except Exception as exc:  # noqa: BLE001
+            _mark("cmd", False, f"{type(exc).__name__}: {exc}")
+
+    # 3) Drop a wake marker under $PEER_BUS_ROOT/wake/<key>.json (external pollers)
+    if WAKE_DROP:
+        try:
+            _ensure_dirs()
+            key = _safe_key(str(recipient.get("key") or "anon"))
+            drop = WAKE / f"{key}.json"
+            if drop.is_symlink():
+                _mark("drop", False, "symlink wake target refused")
+            else:
+                payload = {
+                    "msg_id": envelope.get("msg_id"),
+                    "ts": envelope.get("ts"),
+                    "to": envelope.get("to"),
+                    "from": envelope.get("from"),
+                    "summary": envelope.get("summary"),
+                }
+                tmp = drop.with_suffix(".tmp")
+                tmp.write_text(json.dumps(payload, indent=2) + "\n")
+                os.chmod(tmp, 0o600)
+                tmp.replace(drop)
+                if not _is_under(drop.resolve(), WAKE):
+                    drop.unlink(missing_ok=True)
+                    _mark("drop", False, "wake path escaped WAKE")
+                else:
+                    _mark("drop", True)
+        except Exception as exc:  # noqa: BLE001
+            _mark("drop", False, f"{type(exc).__name__}: {exc}")
+
+    out["attempted"] = methods_tried > 0
+    out["ok"] = methods_ok > 0 if methods_tried else None
+    return out
 
 
 def _slug(text: str) -> str:
@@ -565,6 +675,10 @@ def send_message(
         path.unlink(missing_ok=True)
         raise ValueError("message path escaped INBOX after write")
 
+    envelope["_path"] = str(path)
+    wake = _try_wake(envelope, recipient)
+    envelope.pop("_path", None)
+
     return {
         "ok": True,
         "accepted": True,
@@ -574,6 +688,7 @@ def send_message(
         "to": envelope["to"],
         "from": envelope["from"],
         "warning": recipient.get("warning"),
+        "wake": wake,
         "note": "acceptance only — peer must recv/drain; success≠read",
     }
 

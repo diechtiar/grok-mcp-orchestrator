@@ -2,7 +2,7 @@
 
 Cross-harness **ListAgents / SendMessage** for multi-session agent orchestration.
 
-**Version:** 0.5.0 · **License:** MIT · **Python:** 3.11+ (stdlib only)
+**Version:** 0.6.0 · **License:** MIT · **Python:** 3.11+ (stdlib only)
 
 Claude Code already has native `SendMessage` / `ListAgents`. This project gives **Grok** (and Claude) the same verbs over a small **filesystem bus**, plus a zero-dependency **stdio MCP server**.
 
@@ -17,6 +17,8 @@ Project board: https://github.com/users/diechtiar/projects/4
 - Discover live peers (Grok active sessions, optional Claude statusline snapshots, heartbeats)
 - Send / receive / ack messages (**acceptance ≠ delivery**)
 - `watch` — idle-backoff inbox poller for `/loop` / monitors (`msg_id` + `from.address` only)
+- Wake after accept — drop file + optional cmd/callback (never fails send)
+- Playbook: [`docs/playbook.md`](docs/playbook.md)
 - Session-bound inbox keys (not spoofable via display name)
 - Env-agnostic defaults (no host-specific paths baked into the library)
 - MCP tools for **Grok Build** and **Claude Code**
@@ -180,8 +182,10 @@ Expect six tools and any live peers (or an empty table). If MCP fails to start, 
 | `skills/peer-bus/SKILL.md` | Agent skill stub (triggers + `@v1` pointer) |
 | `$PEER_BUS_ROOT/inbox/<key>/` | Unread messages |
 | `$PEER_BUS_ROOT/registry/` | Heartbeats |
+| `$PEER_BUS_ROOT/wake/<key>.json` | Last-wake marker (best-effort) |
 | [SECURITY.md](SECURITY.md) | Trust model and mitigations |
 | [ROADMAP.md](ROADMAP.md) | Planned work |
+| [docs/playbook.md](docs/playbook.md) | Worked end-to-end playbook |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes |
 
 Optional discovery:
@@ -212,6 +216,9 @@ Neither is required for send/recv.
 | `PEER_BUS_ALLOW_STALE_SEND` | off | Allow send to stale/offline list entries |
 | `PEER_BUS_MAX_BODY` | 48000 | Soft body cap (hard ceiling 64KiB) |
 | `PEER_BUS_MAX_INBOX_FILES` | 200 | Per-inbox file cap |
+| `PEER_BUS_WAKE` | off | Enable `PEER_BUS_WAKE_CMD` after accept |
+| `PEER_BUS_WAKE_CMD` | empty | Shell hook; failures ignored |
+| `PEER_BUS_WAKE_DROP` | on | Write `wake/<key>.json` after accept |
 
 ---
 

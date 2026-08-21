@@ -31,6 +31,8 @@ python3 /path/to/peer_bus.py watch          # msg_id + from.address lines; idle 
 
 Address with `Name [ref]` from `list` when names collide. `--as` / display_name only change the human-readable from.name (inbox key is session-bound).
 
+After `send`, a wake drop is written under `$PEER_BUS_ROOT/wake/<key>.json` (default). Optional `PEER_BUS_WAKE=1` + `PEER_BUS_WAKE_CMD` runs an operator hook; wake failure never fails acceptance.
+
 ## Semantics (binding)
 
 | Claim | Meaning |

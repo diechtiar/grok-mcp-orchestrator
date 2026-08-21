@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0 — 2026-08-21
+
+- Wake after accept ([#3](https://github.com/diechtiar/grok-mcp-orchestrator/issues/3)): default `wake/<key>.json` drop; optional `PEER_BUS_WAKE=1` + `PEER_BUS_WAKE_CMD`; `set_wake_callback()` for in-process Claude dual-write; wake failure never fails acceptance
+- Playbook ([#5](https://github.com/diechtiar/grok-mcp-orchestrator/issues/5)): [`docs/playbook.md`](docs/playbook.md)
+- MCP server version bump to 0.6.0
+
 ## 0.5.0 — 2026-08-21
 
 - `peer-bus watch` — unread inbox poller with idle backoff; emits `msg_id` + `from.address` only ([#4](https://github.com/diechtiar/grok-mcp-orchestrator/issues/4))

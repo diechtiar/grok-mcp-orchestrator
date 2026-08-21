@@ -26,6 +26,8 @@ peer-bus is a **cooperative, same-user** agent bus. It is not a multi-tenant sec
 | Message authenticity | **Not** cryptographic — `from.session_bound` is true only when harness env supplied the id |
 | Confidentiality vs other UIDs on the host | **Not** provided |
 | Prompt injection via bodies | Marked `untrusted`; CLI/MCP expose `body_for_model` / wrapped `body` |
+| Wake hook (`PEER_BUS_WAKE_CMD`) | Operator-supplied shell; runs only when `PEER_BUS_WAKE=1`; failures never undo accept |
+| Wake drop files under `wake/` | Same UID visibility as inbox; no secrets in summaries |
 
 ## `send` success means acceptance
 
