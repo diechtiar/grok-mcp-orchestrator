@@ -1,9 +1,21 @@
 # Roadmap
 
-Tracked on the GitHub Project for this repo.
+Tracked on the [GitHub Project](https://github.com/users/diechtiar/projects/4).
 
-1. **P1 — Claude MCP entry** — same `mcp_server.py` in Claude Code settings.
-2. **P1 — Skill stub** — point agents at README + `@v1` dispatch wire format.
-3. **P2 — Wake bridge** — when recipient harness is Claude, optionally call native SendMessage.
-4. **P2 — Inbox monitor** — watch unread and emit one-line events for `/loop` / monitors.
-5. **P3 — Native Grok dashboard inject** — product-side wake (out of repo scope unless APIs land).
+## Done
+
+- [x] CLI + zero-dep stdio MCP (`list_agents`, `send_message`, `receive_messages`, `ack_message`, `whoami`, `heartbeat`)
+- [x] Env-agnostic bus root (`XDG` / `~/.local/share/peer-bus`)
+- [x] Path containment, symlink refusal, session-bound keys
+- [x] Medium-risk hardenings (session override gate, live-only send, MCP trust refusal, untrusted recv wrappers)
+- [x] Documented Grok + Claude MCP setup (this README)
+
+## Open
+
+1. **P1 — Agent skill stub** — point agents at README + `@v1` dispatch wire format ([#2](https://github.com/diechtiar/grok-mcp-orchestrator/issues/2)).
+2. **P2 — Wake bridge** — optional dual-write to Claude native `SendMessage` when available ([#3](https://github.com/diechtiar/grok-mcp-orchestrator/issues/3)).
+3. **P2 — Inbox monitor** — watch unread for `/loop` / monitors ([#4](https://github.com/diechtiar/grok-mcp-orchestrator/issues/4)).
+4. **P3 — Playbook doc** — worked end-to-end example beyond README ([#5](https://github.com/diechtiar/grok-mcp-orchestrator/issues/5)).
+5. **P3 — Native Grok dashboard inject** — product-side wake if APIs land.
+
+Issue [#1](https://github.com/diechtiar/grok-mcp-orchestrator/issues/1) (Claude MCP recipe) is covered by the README “Configure MCP → Claude Code” section — close when verified on your machines.
