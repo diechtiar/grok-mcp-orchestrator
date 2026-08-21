@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Minimal stdio MCP server for peer-bus (no external deps).
 
+Env-agnostic: bus root and discovery dirs come from peer_bus defaults / env vars
+(PEER_BUS_ROOT, PEER_BUS_USAGE_DIR, GROK_HOME) — nothing host-specific is baked in.
+
 Security: inbox key is session-bound. `display_name` only changes the human-readable
 from.name — it cannot switch whose inbox is read or written.
 """
@@ -13,7 +16,7 @@ from typing import Any
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
 import peer_bus  # noqa: E402
 
-SERVER_INFO = {"name": "peer-bus", "version": "0.2.0"}
+SERVER_INFO = {"name": "peer-bus", "version": "0.3.0"}
 PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS = [
