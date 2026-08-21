@@ -17,7 +17,7 @@ Tracked on the [GitHub Project](https://github.com/users/diechtiar/projects/4).
 
 ## Open
 
-1. **P3 — Native Grok dashboard inject** — **blocked** on product-side wake APIs (no public Grok Build API to inject a turn into another session). Workaround in-tree: `peer-bus watch` + wake drop files.
+1. **P3 — Native Grok dashboard inject** — optional product enhancement if APIs land. **Accepted operator model (2026-08-21):** the user instructs each session to listen (`recv` at turn start, `peer-bus watch` / monitor, or Claude wake hook). Peer-bus does not push-wake Grok sessions.
 2. ~~**Hardening** — automated smoke/CI~~ — `scripts/smoke.sh` + unittest + `.github/workflows/smoke.yml` (**v0.6.5**).
 
 Issues remain open until the operator closes them; roadmap checkboxes track shipped code/docs only.

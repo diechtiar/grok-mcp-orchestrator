@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.6 — 2026-08-21
+
+- Document accepted operator model: user instructs each session to listen; no Grok push-wake
+
 ## 0.6.5 — 2026-08-21
 
 - `peer-bus version` CLI

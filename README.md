@@ -2,7 +2,7 @@
 
 Cross-harness **ListAgents / SendMessage** for multi-session agent orchestration.
 
-**Version:** 0.6.5 · **License:** MIT · **Python:** 3.11+ (stdlib only)
+**Version:** 0.6.6 · **License:** MIT · **Python:** 3.11+ (stdlib only)
 
 Claude Code already has native `SendMessage` / `ListAgents`. This project gives **Grok** (and Claude) the same verbs over a small **filesystem bus**, plus a zero-dependency **stdio MCP server**.
 
@@ -133,7 +133,7 @@ Same OS user on one machine ⇒ shared bus automatically. Set `PEER_BUS_ROOT` id
 | 2 | Optional: set `PEER_BUS_USAGE_DIR` so Grok can list Claude snapshots |
 | 3 | `list_agents` → copy `Name [ref]` |
 | 4 | `send_message` / `peer-bus send` |
-| 5 | Recipient **polls** `receive_messages` / `peer-bus recv` (no auto-wake in v0) |
+| 5 | Recipient **listens** as instructed by the user — `receive_messages` / `recv` / `watch` (no Grok push-wake) |
 | 6 | Reply using the latest inbound `from.address` |
 
 Claude’s native `SendMessage` remains a separate channel (Claude↔Claude). Wake-on-send for Claude is tracked as [#3](https://github.com/diechtiar/grok-mcp-orchestrator/issues/3).

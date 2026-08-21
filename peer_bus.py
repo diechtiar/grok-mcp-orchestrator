@@ -42,7 +42,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-PEER_BUS_VERSION = "0.6.5"
+PEER_BUS_VERSION = "0.6.6"
 
 
 def _default_root() -> Path:

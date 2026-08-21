@@ -4,6 +4,9 @@ Worked end-to-end multi-session flow (Grok↔Grok or Grok↔Claude on the same O
 
 ## 0. Preconditions
 
+**Operator model:** each participating session must be told to listen (poll `recv` / run `watch` / enable the Claude wake hook). There is no automatic Grok push-wake; acceptance still only means the inbox file exists.
+
+
 - Both sessions load peer-bus MCP **or** can run `python3 peer_bus.py …`
 - Same bus root (default `~/.local/share/peer-bus`, or identical `PEER_BUS_ROOT`)
 - Optional: `PEER_BUS_USAGE_DIR` so Grok `list` sees Claude statusline snapshots
