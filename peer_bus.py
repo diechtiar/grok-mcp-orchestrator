@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
 """peer-bus — cross-harness ListAgents / SendMessage.
 
-Filesystem bus under PEER_BUS_ROOT (default /workspace/_shared/peer-bus).
+Env-agnostic filesystem bus. Default root:
+  $PEER_BUS_ROOT, else $XDG_DATA_HOME/peer-bus, else ~/.local/share/peer-bus
 
-Security (v0.2):
+Optional discovery (skip if unset / missing):
+  $PEER_BUS_USAGE_DIR or $USAGE_DIR  — Claude-style statusline snapshots
+  $GROK_HOME (default ~/.grok)       — Grok active_sessions.json + summaries
+
+Security (v0.3):
   - Inbox keys are session-bound when a session id is available (not spoofable via --as).
   - All inbox/registry paths are re-slugged and must resolve under the bus root (no traversal).
   - Symlink inbox directories are refused.
@@ -25,7 +30,6 @@ import argparse
 import json
 import os
 import re
-import stat
 import sys
 import time
 import uuid
@@ -33,11 +37,30 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(os.environ.get("PEER_BUS_ROOT", "/workspace/_shared/peer-bus")).resolve()
+
+def _default_root() -> Path:
+    if os.environ.get("PEER_BUS_ROOT"):
+        return Path(os.environ["PEER_BUS_ROOT"]).expanduser()
+    xdg = os.environ.get("XDG_DATA_HOME")
+    if xdg:
+        return Path(xdg).expanduser() / "peer-bus"
+    return Path.home() / ".local" / "share" / "peer-bus"
+
+
+def _optional_dir(*env_names: str) -> Path | None:
+    for name in env_names:
+        raw = os.environ.get(name)
+        if raw:
+            return Path(raw).expanduser()
+    return None
+
+
+ROOT = _default_root().resolve()
 INBOX = ROOT / "inbox"
 REGISTRY = ROOT / "registry"
-USAGE_DIR = Path(os.environ.get("USAGE_DIR", "/workspace/.usage"))
-GROK_HOME = Path(os.environ.get("GROK_HOME", str(Path.home() / ".grok")))
+# Claude / other harness snapshots — only if explicitly configured (no host-specific default)
+USAGE_DIR = _optional_dir("PEER_BUS_USAGE_DIR", "USAGE_DIR")
+GROK_HOME = Path(os.environ.get("GROK_HOME", str(Path.home() / ".grok"))).expanduser()
 ACTIVE = GROK_HOME / "active_sessions.json"
 SESSIONS = GROK_HOME / "sessions"
 
@@ -46,7 +69,6 @@ HARD_MAX_BODY = 64_000
 MAX_BODY = min(int(os.environ.get("PEER_BUS_MAX_BODY", "48000")), HARD_MAX_BODY)
 MAX_INBOX_FILES = int(os.environ.get("PEER_BUS_MAX_INBOX_FILES", "200"))
 TRUST_NAME_KEYS = os.environ.get("PEER_BUS_TRUST_NAME_KEYS", "").lower() in {"1", "true", "yes"}
-
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
@@ -259,10 +281,11 @@ def _grok_agents() -> list[dict[str, Any]]:
 
 def _usage_agents(stale_min: float = 30.0) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
-    if not USAGE_DIR.is_dir():
+    usage_dir = USAGE_DIR
+    if usage_dir is None or not usage_dir.is_dir():
         return out
     now = time.time()
-    for path in sorted(USAGE_DIR.glob("*.json")):
+    for path in sorted(usage_dir.glob("*.json")):
         if path.name.startswith(".") or path.name == "guard-state.json":
             continue
         if path.is_symlink():

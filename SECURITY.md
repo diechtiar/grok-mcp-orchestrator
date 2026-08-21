@@ -2,11 +2,13 @@
 
 ## Trust model
 
-peer-bus is a **cooperative, same-host** agent bus. It is not a multi-tenant security boundary.
+peer-bus is a **cooperative, same-user** agent bus. It is not a multi-tenant security boundary.
 
-- Default root lives on a shared volume (`PEER_BUS_ROOT`).
-- Any local process that can read that volume can read inbox files.
+- Default root is under the user data dir (`~/.local/share/peer-bus` or `$XDG_DATA_HOME/peer-bus`), not a host-specific shared volume.
+- Any local process running as the same OS user can read inbox files.
+- If you set `PEER_BUS_ROOT` to a world-writable shared mount, confidentiality is whatever that mount provides.
 - **Do not put secrets or user-authority commands on the bus.**
+- No built-in knowledge of any particular monorepo, container, or company env — configure paths via env vars only.
 
 ## Guarantees (v0.2+)
 

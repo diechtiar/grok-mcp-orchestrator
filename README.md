@@ -65,10 +65,14 @@ Claude can use the same CLI from bash, or point its MCP settings at `mcp_server.
 |------|------|
 | `peer_bus.py` | Library + CLI |
 | `mcp_server.py` | JSON-RPC MCP over stdio (no PyPI deps) |
-| `$PEER_BUS_ROOT/inbox/<key>/` | Unread messages (default root: `/workspace/_shared/peer-bus` in vida-dev) |
+| `$PEER_BUS_ROOT/inbox/<key>/` | Unread messages |
 | `$PEER_BUS_ROOT/registry/` | Heartbeats |
 
-Override root with `PEER_BUS_ROOT`.
+**Default root (portable):** `$PEER_BUS_ROOT` → else `$XDG_DATA_HOME/peer-bus` → else `~/.local/share/peer-bus`.
+
+Same OS user ⇒ same default root ⇒ sessions on one machine already share a bus. Point `PEER_BUS_ROOT` at a shared mount only when you need a non-default location.
+
+Optional Claude snapshot discovery: set `PEER_BUS_USAGE_DIR` (or `USAGE_DIR`) to a directory of statusline JSON files. Grok discovery uses `$GROK_HOME` (default `~/.grok`). Neither path is required for send/recv.
 
 ## Semantics
 
