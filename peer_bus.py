@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
-"""peer-bus — cross-harness ListAgents / SendMessage for vida-dev.
+"""peer-bus — cross-harness ListAgents / SendMessage.
 
 Filesystem bus under PEER_BUS_ROOT (default /workspace/_shared/peer-bus).
-Works for Grok and Claude without Claude's native SendMessage.
 
-Semantics (aligned with peer-dispatch / peer-message-loss-is-measurable):
-  - send() returning ok proves ACCEPTANCE (file written), never that a peer read it.
-  - Prefer addressing by session id / ref; bare names can collide.
-  - Reply to the `from` of the most recent received message when possible.
-  - Delivery is poll-based: peers call receive / drain_inbox (no harness wake in v0).
+Security (v0.2):
+  - Inbox keys are session-bound when a session id is available (not spoofable via --as).
+  - All inbox/registry paths are re-slugged and must resolve under the bus root (no traversal).
+  - Symlink inbox directories are refused.
+  - send() ok proves ACCEPTANCE only, never that a peer read the message.
+  - --as / display_name only affects the human-readable from.name unless
+    PEER_BUS_TRUST_NAME_KEYS=1 (dev/smoke only — allows name-keyed inboxes).
 
 CLI:
-  peer-bus whoami [--as NAME]
-  peer-bus list [--json]
-  peer-bus send --to NAME|ID --body TEXT [--summary TEXT] [--as NAME]
-  peer-bus recv [--as NAME] [--all] [--json]
-  peer-bus ack MSG_ID [--as NAME]
-  peer-bus heartbeat [--as NAME]   # refresh registry presence
+  peer-bus whoami [--as DISPLAY]
+  peer-bus list [--json] [--all]
+  peer-bus send --to NAME|ID --body TEXT [--summary TEXT] [--as DISPLAY]
+  peer-bus recv [--json] [--all]
+  peer-bus ack MSG_ID
+  peer-bus heartbeat [--as DISPLAY]
 """
 from __future__ import annotations
 
@@ -24,6 +25,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import sys
 import time
 import uuid
@@ -39,7 +41,11 @@ GROK_HOME = Path(os.environ.get("GROK_HOME", str(Path.home() / ".grok")))
 ACTIVE = GROK_HOME / "active_sessions.json"
 SESSIONS = GROK_HOME / "sessions"
 
-MAX_BODY = int(os.environ.get("PEER_BUS_MAX_BODY", "48000"))
+# Soft default + hard ceiling (env cannot raise above HARD_MAX_BODY)
+HARD_MAX_BODY = 64_000
+MAX_BODY = min(int(os.environ.get("PEER_BUS_MAX_BODY", "48000")), HARD_MAX_BODY)
+MAX_INBOX_FILES = int(os.environ.get("PEER_BUS_MAX_INBOX_FILES", "200"))
+TRUST_NAME_KEYS = os.environ.get("PEER_BUS_TRUST_NAME_KEYS", "").lower() in {"1", "true", "yes"}
 
 
 def _now() -> str:
@@ -49,81 +55,167 @@ def _now() -> str:
 def _ensure_dirs() -> None:
     INBOX.mkdir(parents=True, exist_ok=True)
     REGISTRY.mkdir(parents=True, exist_ok=True)
+    # Best-effort tighten bus dirs (shared volume may ignore mode)
+    try:
+        os.chmod(INBOX, 0o700)
+        os.chmod(REGISTRY, 0o700)
+    except OSError:
+        pass
 
 
 def _slug(text: str) -> str:
     text = (text or "").strip().lower()
     text = re.sub(r"[^a-z0-9._+-]+", "-", text)
-    return text.strip("-")[:80] or "anon"
+    text = text.strip(".-+")
+    # Collapse residual dot-dot style after substitution
+    text = re.sub(r"\.{2,}", ".", text)
+    return text[:80] or "anon"
 
 
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
+        if path.is_symlink():
+            return None
         return json.loads(path.read_text())
     except Exception:
         return None
 
 
-def detect_self(explicit: str | None = None) -> dict[str, Any]:
-    """Resolve this agent's identity."""
-    if explicit:
-        return {
-            "key": _slug(explicit),
-            "name": explicit,
-            "harness": os.environ.get("PEER_BUS_HARNESS", "unknown"),
-            "session_id": os.environ.get("GROK_SESSION_ID")
-            or os.environ.get("CLAUDE_SESSION_ID")
-            or os.environ.get("PEER_BUS_SESSION_ID"),
-            "cwd": os.getcwd(),
-        }
+def _is_under(child: Path, parent: Path) -> bool:
+    try:
+        child.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
 
-    env_name = os.environ.get("PEER_BUS_SELF") or os.environ.get("PEER_BUS_NAME")
-    grok_sid = os.environ.get("GROK_SESSION_ID")
-    name = env_name
+
+def _refuse_symlink(path: Path, label: str) -> None:
+    if path.exists() and path.is_symlink():
+        raise ValueError(f"refusing symlink {label}: {path}")
+    # Also refuse if any parent under ROOT is a symlink escape — resolve already flattens,
+    # but check the final path is still under ROOT.
+    if path.exists() and not _is_under(path, ROOT):
+        raise ValueError(f"path escapes peer-bus root: {path}")
+
+
+def _safe_key(raw: str) -> str:
+    key = _slug(raw)
+    if key in {"", ".", "..", "anon"} and _slug(raw) == "anon" and (raw or "").strip() not in {"", "anon"}:
+        # collapsed to anon from garbage — still ok, but reject pure traversal leftovers
+        pass
+    if "/" in key or "\\" in key or ".." in key.split("."):
+        raise ValueError(f"illegal key after slug: {raw!r} -> {key!r}")
+    return key
+
+
+def _inbox_dir(key_raw: str, *, create: bool = True) -> Path:
+    """Return a directory path guaranteed under INBOX (no traversal / symlink)."""
+    key = _safe_key(key_raw)
+    _ensure_dirs()
+    dest = INBOX / key
+    if dest.exists():
+        _refuse_symlink(dest, "inbox dir")
+        if not dest.is_dir():
+            raise ValueError(f"inbox path is not a directory: {dest}")
+    elif create:
+        dest.mkdir(parents=True, exist_ok=True)
+        _refuse_symlink(dest, "inbox dir")
+    resolved = dest.resolve()
+    if not _is_under(resolved, INBOX):
+        raise ValueError(f"inbox path escapes INBOX: {resolved}")
+    return dest
+
+
+def _registry_path(key_raw: str) -> Path:
+    key = _safe_key(key_raw)
+    _ensure_dirs()
+    path = REGISTRY / f"{key}.json"
+    if path.exists():
+        _refuse_symlink(path, "registry file")
+    if not _is_under(path if not path.exists() else path.resolve(), REGISTRY):
+        # non-existent: check parent
+        if not _is_under(REGISTRY / key, REGISTRY):
+            raise ValueError("registry path escape")
+    return path
+
+
+def _session_id() -> str | None:
+    return (
+        os.environ.get("GROK_SESSION_ID")
+        or os.environ.get("CLAUDE_SESSION_ID")
+        or os.environ.get("PEER_BUS_SESSION_ID")
+        or None
+    )
+
+
+def detect_self(display_name: str | None = None) -> dict[str, Any]:
+    """Resolve this agent's identity.
+
+    Inbox key is bound to session id when present. display_name / --as only changes
+    the human-readable name (and from.name on send), unless PEER_BUS_TRUST_NAME_KEYS=1.
+    """
+    sid = _session_id()
     harness = os.environ.get("PEER_BUS_HARNESS")
     title = None
-    if grok_sid:
-        harness = harness or "grok"
-        # Find summary across cwd groups
+    env_name = os.environ.get("PEER_BUS_SELF") or os.environ.get("PEER_BUS_NAME")
+
+    if sid and (SESSIONS.is_dir()):
+        harness = harness or ("grok" if os.environ.get("GROK_SESSION_ID") else None)
         for group in SESSIONS.glob("*"):
-            summary = group / grok_sid / "summary.json"
+            summary = group / sid / "summary.json"
             data = _read_json(summary)
             if data:
                 title = data.get("generated_title") or data.get("session_summary") or None
                 if data.get("title_is_manual") and data.get("generated_title"):
                     title = data["generated_title"]
+                harness = harness or "grok"
                 break
-        name = name or title or f"grok-{grok_sid[:8]}"
-    elif os.environ.get("CLAUDE_SESSION_ID"):
-        harness = harness or "claude"
-        name = name or os.environ.get("CLAUDE_SESSION_NAME") or f"claude-{os.environ['CLAUDE_SESSION_ID'][:8]}"
+
+    if os.environ.get("CLAUDE_SESSION_ID") and not harness:
+        harness = "claude"
+
+    name = display_name or env_name or title
+    if not name:
+        name = f"grok-{sid[:8]}" if sid else f"anon-{uuid.uuid4().hex[:8]}"
+
+    if sid and not TRUST_NAME_KEYS:
+        key = _safe_key(sid)
+    elif TRUST_NAME_KEYS and (display_name or env_name):
+        key = _safe_key(display_name or env_name or name)
+    elif sid:
+        key = _safe_key(sid)
     else:
-        harness = harness or "unknown"
-        name = name or f"agent-{uuid.uuid4().hex[:8]}"
+        key = _safe_key(name)
 
     return {
-        "key": _slug(name),
+        "key": key,
         "name": name,
-        "harness": harness,
-        "session_id": grok_sid
-        or os.environ.get("CLAUDE_SESSION_ID")
-        or os.environ.get("PEER_BUS_SESSION_ID"),
+        "harness": harness or "unknown",
+        "session_id": sid,
         "cwd": os.getcwd(),
         "title": title,
+        "name_keys": TRUST_NAME_KEYS,
     }
 
 
 def heartbeat(self_info: dict[str, Any] | None = None) -> dict[str, Any]:
-    _ensure_dirs()
     me = self_info or detect_self()
-    path = REGISTRY / f"{me['key']}.json"
+    path = _registry_path(me["key"])
     payload = {
-        **me,
+        "key": me["key"],  # always our computed key, never caller-controlled alternate
+        "name": me["name"],
+        "harness": me.get("harness"),
+        "session_id": me.get("session_id"),
+        "cwd": me.get("cwd"),
         "ts": _now(),
         "epoch": time.time(),
         "pid": os.getpid(),
     }
     path.write_text(json.dumps(payload, indent=2) + "\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
     return payload
 
 
@@ -134,6 +226,8 @@ def _grok_agents() -> list[dict[str, Any]]:
         return out
     by_id = {a.get("session_id"): a for a in active if isinstance(a, dict)}
     for sid, meta in by_id.items():
+        if not sid:
+            continue
         title = None
         updated = None
         for group in SESSIONS.glob("*"):
@@ -144,9 +238,10 @@ def _grok_agents() -> list[dict[str, Any]]:
                 updated = data.get("last_active_at") or data.get("updated_at")
                 break
         name = title or f"grok-{sid[:8]}"
+        key = _safe_key(sid)
         out.append(
             {
-                "key": _slug(name),
+                "key": key,
                 "name": name,
                 "ref": sid[:6],
                 "session_id": sid,
@@ -170,20 +265,22 @@ def _usage_agents(stale_min: float = 30.0) -> list[dict[str, Any]]:
     for path in sorted(USAGE_DIR.glob("*.json")):
         if path.name.startswith(".") or path.name == "guard-state.json":
             continue
+        if path.is_symlink():
+            continue
         data = _read_json(path)
         if not data:
             continue
         age_min = (now - path.stat().st_mtime) / 60
         name = data.get("name") or data.get("session_name") or path.stem[:12]
         sid = data.get("session") or data.get("session_id") or path.stem
+        key = _safe_key(str(sid))
         out.append(
             {
-                "key": _slug(str(name)),
+                "key": key,
                 "name": str(name),
                 "ref": str(sid)[:6],
                 "session_id": str(sid),
-                "harness": "claude" if "claude" in str(data.get("model", "")).lower() or True else "unknown",
-                # usage snapshots are Claude statusline in this env
+                "harness": "claude",
                 "state": "stale" if age_min > stale_min else "live",
                 "cwd": data.get("cwd") or data.get("workspace"),
                 "model": data.get("model"),
@@ -193,10 +290,6 @@ def _usage_agents(stale_min: float = 30.0) -> list[dict[str, Any]]:
                 "source": "usage",
             }
         )
-    # Prefer labelling usage as claude — that's how this container writes them
-    for row in out:
-        if row.get("source") == "usage":
-            row["harness"] = "claude"
     return out
 
 
@@ -206,17 +299,21 @@ def _registry_agents(stale_min: float = 15.0) -> list[dict[str, Any]]:
     if not REGISTRY.is_dir():
         return out
     for path in REGISTRY.glob("*.json"):
+        if path.is_symlink():
+            continue
         data = _read_json(path)
         if not data:
             continue
+        # NEVER trust data["key"] from disk — filename stem is authoritative
+        key = _safe_key(path.stem)
         age_min = (now - float(data.get("epoch") or path.stat().st_mtime)) / 60
-        name = data.get("name") or path.stem
-        sid = data.get("session_id") or path.stem
+        name = data.get("name") or key
+        sid = data.get("session_id") or key
         out.append(
             {
-                "key": data.get("key") or _slug(str(name)),
+                "key": key,
                 "name": name,
-                "ref": str(sid)[:6] if sid else path.stem[:6],
+                "ref": str(sid)[:6] if sid else key[:6],
                 "session_id": sid,
                 "harness": data.get("harness") or "unknown",
                 "state": "stale" if age_min > stale_min else "live",
@@ -230,19 +327,16 @@ def _registry_agents(stale_min: float = 15.0) -> list[dict[str, Any]]:
 
 
 def list_agents(include_stale: bool = False) -> list[dict[str, Any]]:
-    """Merge discovery sources. Prefer live; de-dupe by session_id then key."""
     _ensure_dirs()
     rows = _grok_agents() + _usage_agents() + _registry_agents()
     if not include_stale:
         rows = [r for r in rows if r.get("state") != "stale"]
 
     by_sid: dict[str, dict[str, Any]] = {}
-    by_key: dict[str, dict[str, Any]] = {}
     merged: list[dict[str, Any]] = []
     for row in rows:
         sid = row.get("session_id")
         if sid and sid in by_sid:
-            # Prefer grok active over usage/registry for same id
             prev = by_sid[sid]
             if prev.get("harness") == "grok" and row.get("harness") != "grok":
                 continue
@@ -252,16 +346,10 @@ def list_agents(include_stale: bool = False) -> list[dict[str, Any]]:
                 continue
         if sid:
             by_sid[sid] = row
-        key = row.get("key")
-        if key and key in by_key and by_key[key] is not row:
-            # name collision — keep both but flag
-            row["name_collision"] = True
-            by_key[key]["name_collision"] = True
-        if key:
-            by_key[key] = row
+        # Force safe key on every row
+        row["key"] = _safe_key(str(row.get("key") or row.get("session_id") or row.get("name")))
         merged.append(row)
 
-    # Count name collisions for the list summary
     names: dict[str, int] = {}
     for row in merged:
         names[row["name"]] = names.get(row["name"], 0) + 1
@@ -272,7 +360,6 @@ def list_agents(include_stale: bool = False) -> list[dict[str, Any]]:
 
 
 def resolve_recipient(to: str, agents: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """Resolve to= name | name [ref] | session_id | key."""
     agents = agents if agents is not None else list_agents(include_stale=True)
     raw = to.strip()
     m = re.match(r"^(.*?)\s*\[([0-9a-fA-F]{4,})\]\s*$", raw)
@@ -281,38 +368,50 @@ def resolve_recipient(to: str, agents: list[dict[str, Any]] | None = None) -> di
     matches: list[dict[str, Any]] = []
     for a in agents:
         sid = str(a.get("session_id") or "")
-        if raw == sid or raw == a.get("key") or raw.lower() == sid.lower():
+        key = str(a.get("key") or "")
+        if raw == sid or raw == key or raw.lower() == sid.lower():
             matches = [a]
             break
         if ref_part and sid.lower().startswith(ref_part):
-            if _slug(name_part) == a.get("key") or name_part == a.get("name") or not name_part:
+            if _slug(name_part) == key or name_part == a.get("name") or not name_part:
                 matches.append(a)
             continue
-        if name_part == a.get("name") or _slug(name_part) == a.get("key"):
+        if name_part == a.get("name") or _slug(name_part) == key:
             matches.append(a)
 
     if not matches:
-        # Allow send to a key that only has an inbox / will be created
+        if not TRUST_NAME_KEYS:
+            raise ValueError(
+                f"unknown recipient {raw!r}; list_agents first, or set "
+                "PEER_BUS_TRUST_NAME_KEYS=1 for name-keyed smoke tests"
+            )
         return {
-            "key": _slug(name_part or raw),
+            "key": _safe_key(name_part or raw),
             "name": name_part or raw,
             "session_id": None,
             "harness": "unknown",
             "state": "unlisted",
             "address": raw,
-            "warning": "recipient not in list_agents; inbox will still be created",
+            "warning": "unlisted name-key recipient (TRUST_NAME_KEYS)",
         }
+
     if len(matches) > 1 and not ref_part:
         opts = ", ".join(a.get("address") or a["name"] for a in matches)
         raise ValueError(f"ambiguous name {name_part!r}; disambiguate with ref: {opts}")
     if ref_part:
         refined = [a for a in matches if str(a.get("session_id") or "").lower().startswith(ref_part)]
         if len(refined) == 1:
-            return refined[0]
-        if not refined:
+            chosen = refined[0]
+        elif not refined:
             raise ValueError(f"no agent matching {raw!r}")
-        matches = refined
-    return matches[0]
+        else:
+            chosen = refined[0]
+    else:
+        chosen = matches[0]
+
+    chosen = dict(chosen)
+    chosen["key"] = _safe_key(str(chosen.get("session_id") or chosen.get("key")))
+    return chosen
 
 
 def send_message(
@@ -323,22 +422,30 @@ def send_message(
     self_info: dict[str, Any] | None = None,
     msg_type: str = "message",
 ) -> dict[str, Any]:
-    _ensure_dirs()
     me = self_info or detect_self()
     heartbeat(me)
+    if not isinstance(body, str):
+        raise ValueError("body must be a string")
     if len(body) > MAX_BODY:
         raise ValueError(f"body too large ({len(body)} > {MAX_BODY})")
 
     recipient = resolve_recipient(to)
+    dest_dir = _inbox_dir(recipient["key"], create=True)
+
+    existing = list(dest_dir.glob("*.json"))
+    if len(existing) >= MAX_INBOX_FILES:
+        raise ValueError(f"inbox full for {recipient['key']} ({MAX_INBOX_FILES} files)")
+
     msg_id = uuid.uuid4().hex
-    dest_dir = INBOX / recipient["key"]
-    dest_dir.mkdir(parents=True, exist_ok=True)
     path = dest_dir / f"{int(time.time())}-{msg_id}.json"
+    if path.exists() or path.is_symlink():
+        raise ValueError("refusing to overwrite existing/symlink message path")
+
     envelope = {
         "msg_id": msg_id,
         "ts": _now(),
         "type": msg_type,
-        "summary": (summary or body.splitlines()[0])[:120],
+        "summary": (summary or (body.splitlines()[0] if body else ""))[:120],
         "body": body,
         "from": {
             "key": me["key"],
@@ -356,11 +463,29 @@ def send_message(
         },
         "read": False,
     }
-    path.write_text(json.dumps(envelope, indent=2) + "\n")
+    # Write without following symlinks: open with O_NOFOLLOW|O_CREAT|O_EXCL when possible
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(str(path), flags, 0o600)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            handle.write(json.dumps(envelope, indent=2) + "\n")
+    except Exception:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+    if not _is_under(path.resolve(), INBOX):
+        path.unlink(missing_ok=True)
+        raise ValueError("message path escaped INBOX after write")
+
     return {
         "ok": True,
         "accepted": True,
-        "delivered_to_reader": False,  # never claim this
+        "delivered_to_reader": False,
         "msg_id": msg_id,
         "path": str(path),
         "to": envelope["to"],
@@ -376,13 +501,15 @@ def receive_messages(
     unread_only: bool = True,
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    _ensure_dirs()
     me = self_info or detect_self()
     heartbeat(me)
-    dest = INBOX / me["key"]
+    try:
+        dest = _inbox_dir(me["key"], create=False)
+    except ValueError:
+        return []
     if not dest.is_dir():
         return []
-    files = sorted(dest.glob("*.json"))
+    files = sorted(p for p in dest.glob("*.json") if not p.is_symlink())
     out: list[dict[str, Any]] = []
     for path in files:
         data = _read_json(path)
@@ -390,27 +517,39 @@ def receive_messages(
             continue
         if unread_only and data.get("read"):
             continue
+        # Do not echo absolute paths into model context by default — keep optional
         data["_path"] = str(path)
         out.append(data)
-        if len(out) >= limit:
+        if len(out) >= max(1, min(limit, 100)):
             break
     return out
 
 
 def ack_message(msg_id: str, self_info: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not re.fullmatch(r"[0-9a-fA-F]{16,64}", msg_id or ""):
+        return {"ok": False, "error": "invalid msg_id"}
     me = self_info or detect_self()
-    dest = INBOX / me["key"]
+    try:
+        dest = _inbox_dir(me["key"], create=False)
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
     for path in dest.glob("*.json"):
+        if path.is_symlink():
+            continue
         data = _read_json(path)
         if not data or data.get("msg_id") != msg_id:
             continue
         data["read"] = True
         data["acked_at"] = _now()
-        path.write_text(json.dumps(data, indent=2) + "\n")
         read_dir = dest / "read"
         read_dir.mkdir(exist_ok=True)
-        path.rename(read_dir / path.name)
-        return {"ok": True, "msg_id": msg_id, "moved_to": str(read_dir / path.name)}
+        _refuse_symlink(read_dir, "read dir")
+        target = read_dir / path.name
+        path.write_text(json.dumps(data, indent=2) + "\n")
+        path.rename(target)
+        if not _is_under(target.resolve(), INBOX):
+            return {"ok": False, "error": "ack target escaped INBOX"}
+        return {"ok": True, "msg_id": msg_id, "moved_to": str(target)}
     return {"ok": False, "error": f"msg_id not found in inbox for {me['key']}: {msg_id}"}
 
 
@@ -449,6 +588,7 @@ def _cmd_send(args: argparse.Namespace) -> int:
     me = detect_self(args.as_name)
     body = args.body
     if args.body_file:
+        # CLI-only: read a local file the operator chose
         body = Path(args.body_file).read_text()
     if body is None:
         body = sys.stdin.read()
@@ -462,7 +602,10 @@ def _cmd_send(args: argparse.Namespace) -> int:
 
 
 def _cmd_recv(args: argparse.Namespace) -> int:
-    me = detect_self(args.as_name)
+    # recv ignores --as for inbox selection unless TRUST_NAME_KEYS
+    me = detect_self(args.as_name if TRUST_NAME_KEYS else None)
+    if args.as_name and not TRUST_NAME_KEYS:
+        me["name"] = args.as_name  # display only; key unchanged
     msgs = receive_messages(me, unread_only=not args.all)
     if args.json:
         print(json.dumps(msgs, indent=2))
@@ -473,13 +616,15 @@ def _cmd_recv(args: argparse.Namespace) -> int:
     for m in msgs:
         fr = m.get("from") or {}
         print(f"--- {m.get('msg_id')} from={fr.get('address') or fr.get('name')} ts={m.get('ts')}")
+        print("<<<UNTRUSTED_PEER_MESSAGE>>>")
         print(m.get("summary") or "")
         print(m.get("body") or "")
+        print("<<<END_UNTRUSTED_PEER_MESSAGE>>>")
     return 0
 
 
 def _cmd_ack(args: argparse.Namespace) -> int:
-    me = detect_self(args.as_name)
+    me = detect_self(args.as_name if TRUST_NAME_KEYS else None)
     print(json.dumps(ack_message(args.msg_id, me), indent=2))
     return 0
 
@@ -490,7 +635,12 @@ def _cmd_heartbeat(args: argparse.Namespace) -> int:
 
 
 def _add_as(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--as", dest="as_name", default=None, help="override identity name")
+    p.add_argument(
+        "--as",
+        dest="as_name",
+        default=None,
+        help="display name only (inbox key stays session-bound unless PEER_BUS_TRUST_NAME_KEYS=1)",
+    )
 
 
 def main(argv: list[str] | None = None) -> int:

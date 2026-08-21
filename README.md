@@ -16,23 +16,31 @@ Aligned with a contract/priors dispatch style: send records, not essays; reply t
 
 ## Quick start
 
-```bash
-# identity
-python3 peer_bus.py whoami --as Orchestra
+Inbox keys are **session-bound** (not spoofable with `--as`). `--as` / `PEER_BUS_SELF` only set the display name.
 
-# discover
+```bash
+python3 peer_bus.py whoami --as Rick
 python3 peer_bus.py list
 
-# send (prefer name [ref] when names collide)
-python3 peer_bus.py send --as Orchestra --to "Worker [abc123]" \
+# send to another live session (prefer name [ref] when names collide)
+python3 peer_bus.py send --as Rick --to "Luke [01a023]" \
   --body $'@v1 ping\nDO|one-line ack\nRPT|ok'
 
-# peer side
-python3 peer_bus.py recv --as Worker
-python3 peer_bus.py ack <msg_id> --as Worker
+# on Luke's session (same machine, their GROK_SESSION_ID):
+python3 peer_bus.py recv
+python3 peer_bus.py ack <msg_id>
+```
+
+Local smoke with two name-keyed personas on one process (dev only):
+
+```bash
+PEER_BUS_TRUST_NAME_KEYS=1 peer-bus send --as Orchestra --to Worker --body ping
+PEER_BUS_TRUST_NAME_KEYS=1 peer-bus recv --as Worker
 ```
 
 Optional symlink: `ln -s "$(pwd)/peer_bus.py" ~/bin/peer-bus`
+
+See [SECURITY.md](SECURITY.md) for the trust model and mitigations.
 
 ## MCP (Grok Build)
 
@@ -45,7 +53,7 @@ env = { PEER_BUS_SELF = "Rick", PEER_BUS_HARNESS = "grok" }
 enabled = true
 ```
 
-Tools: `list_agents`, `send_message`, `receive_messages`, `ack_message`, `whoami`, `heartbeat`.
+`PEER_BUS_SELF` is the display name only. Tools: `list_agents`, `send_message`, `receive_messages`, `ack_message`, `whoami`, `heartbeat` (no impersonation via `as_name`).
 
 Reload MCP / restart the session after editing config.
 
