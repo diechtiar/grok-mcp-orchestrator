@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 — 2026-08-21
+
+- `peer-bus watch` — unread inbox poller with idle backoff; emits `msg_id` + `from.address` only ([#4](https://github.com/diechtiar/grok-mcp-orchestrator/issues/4))
+- Agent skill stub [`skills/peer-bus/SKILL.md`](skills/peer-bus/SKILL.md) ([#2](https://github.com/diechtiar/grok-mcp-orchestrator/issues/2))
+- MCP server version bump to 0.5.0
+
 ## 0.4.0 — 2026-08-21
 
 - Medium-risk hardenings: session override gate, live-only send by default, MCP refuses `PEER_BUS_TRUST_NAME_KEYS`, untrusted recv wrappers (`body_for_model` / wrapped `body`)

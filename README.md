@@ -2,7 +2,7 @@
 
 Cross-harness **ListAgents / SendMessage** for multi-session agent orchestration.
 
-**Version:** 0.4.0 · **License:** MIT · **Python:** 3.11+ (stdlib only)
+**Version:** 0.5.0 · **License:** MIT · **Python:** 3.11+ (stdlib only)
 
 Claude Code already has native `SendMessage` / `ListAgents`. This project gives **Grok** (and Claude) the same verbs over a small **filesystem bus**, plus a zero-dependency **stdio MCP server**.
 
@@ -16,9 +16,11 @@ Project board: https://github.com/users/diechtiar/projects/4
 
 - Discover live peers (Grok active sessions, optional Claude statusline snapshots, heartbeats)
 - Send / receive / ack messages (**acceptance ≠ delivery**)
+- `watch` — idle-backoff inbox poller for `/loop` / monitors (`msg_id` + `from.address` only)
 - Session-bound inbox keys (not spoofable via display name)
 - Env-agnostic defaults (no host-specific paths baked into the library)
 - MCP tools for **Grok Build** and **Claude Code**
+- Agent skill stub: [`skills/peer-bus/SKILL.md`](skills/peer-bus/SKILL.md)
 
 ---
 
@@ -50,6 +52,10 @@ python3 peer_bus.py send --as Rick --to "Luke [01a023]" \
 # on the recipient session (their harness session id):
 python3 peer_bus.py recv
 python3 peer_bus.py ack <msg_id>
+
+# monitor-friendly watch (one line per new unread; backoff when idle)
+python3 peer_bus.py watch
+# → <msg_id>\t<from.address>
 ```
 
 Local smoke with two name-keyed personas on one process (**dev only**):
@@ -169,8 +175,9 @@ Expect six tools and any live peers (or an empty table). If MCP fails to start, 
 
 | Path | Role |
 |------|------|
-| `peer_bus.py` | Library + CLI |
+| `peer_bus.py` | Library + CLI (`watch`, `send`, `recv`, …) |
 | `mcp_server.py` | JSON-RPC MCP over stdio (no PyPI deps) |
+| `skills/peer-bus/SKILL.md` | Agent skill stub (triggers + `@v1` pointer) |
 | `$PEER_BUS_ROOT/inbox/<key>/` | Unread messages |
 | `$PEER_BUS_ROOT/registry/` | Heartbeats |
 | [SECURITY.md](SECURITY.md) | Trust model and mitigations |

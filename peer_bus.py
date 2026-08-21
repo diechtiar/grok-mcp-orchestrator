@@ -26,6 +26,7 @@ CLI:
   peer-bus recv [--json] [--all]
   peer-bus ack MSG_ID
   peer-bus heartbeat [--as DISPLAY]
+  peer-bus watch [--interval SEC] [--max-interval SEC] [--once]
 """
 from __future__ import annotations
 
@@ -722,6 +723,39 @@ def _cmd_heartbeat(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_watch(args: argparse.Namespace) -> int:
+    """Emit one line per new unread message: msg_id<TAB>from.address. Backoff when idle."""
+    me = detect_self(args.as_name if TRUST_NAME_KEYS else None)
+    if args.as_name and not TRUST_NAME_KEYS:
+        me["name"] = args.as_name
+    interval = max(0.5, float(args.interval))
+    max_interval = max(interval, float(args.max_interval))
+    delay = interval
+    seen: set[str] = set()
+    try:
+        while True:
+            msgs = receive_messages(me, unread_only=True, limit=100)
+            fresh = False
+            for m in msgs:
+                mid = m.get("msg_id")
+                if not isinstance(mid, str) or mid in seen:
+                    continue
+                seen.add(mid)
+                fr = m.get("from") if isinstance(m.get("from"), dict) else {}
+                addr = fr.get("address") or fr.get("name") or ""
+                print(f"{mid}\t{addr}", flush=True)
+                fresh = True
+            if args.once:
+                return 0
+            if fresh:
+                delay = interval
+            else:
+                delay = min(max_interval, delay * 1.5)
+            time.sleep(delay)
+    except KeyboardInterrupt:
+        return 0
+
+
 def _add_as(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--as",
@@ -767,6 +801,25 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("heartbeat")
     _add_as(p)
     p.set_defaults(func=_cmd_heartbeat)
+
+    p = sub.add_parser(
+        "watch",
+        help="watch unread inbox; print msg_id and from.address per new message (backoff when idle)",
+    )
+    _add_as(p)
+    p.add_argument("--interval", type=float, default=2.0, help="base poll seconds (default 2)")
+    p.add_argument(
+        "--max-interval",
+        type=float,
+        default=30.0,
+        help="idle backoff cap seconds (default 30)",
+    )
+    p.add_argument(
+        "--once",
+        action="store_true",
+        help="scan once and exit (still prints only new unread lines)",
+    )
+    p.set_defaults(func=_cmd_watch)
 
     args = parser.parse_args(argv)
     return args.func(args)
