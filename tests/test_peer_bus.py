@@ -122,5 +122,46 @@ class CliSmokeTests(unittest.TestCase):
             )
 
 
+
+class McpTrustRefusalTests(unittest.TestCase):
+    def test_mcp_exits_when_trust_name_keys_set(self) -> None:
+        env = os.environ.copy()
+        env["PEER_BUS_TRUST_NAME_KEYS"] = "1"
+        env["PEER_BUS_ROOT"] = tempfile.mkdtemp(prefix="peer-bus-mcp-")
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "mcp_server.py")],
+            input='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n',
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        self.assertNotEqual(proc.returncode, 0)
+
+
+class BodyCapTests(unittest.TestCase):
+    def test_body_too_large_raises(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="peer-bus-cap-") as tmp:
+            root = Path(tmp)
+            peer_bus.ROOT = root.resolve()
+            peer_bus.INBOX = peer_bus.ROOT / "inbox"
+            peer_bus.REGISTRY = peer_bus.ROOT / "registry"
+            peer_bus.WAKE = peer_bus.ROOT / "wake"
+            peer_bus.TRUST_NAME_KEYS = True
+            peer_bus.WAKE_DROP = True
+            peer_bus._ensure_dirs()
+            env = {"PEER_BUS_ROOT": tmp, "PEER_BUS_TRUST_NAME_KEYS": "1"}
+            with mock.patch.dict(os.environ, env, clear=False):
+                old = peer_bus.MAX_BODY
+                peer_bus.MAX_BODY = 32
+                try:
+                    sender = peer_bus.detect_self("Orchestra")
+                    with self.assertRaises(ValueError):
+                        peer_bus.send_message("Worker", "x" * 64, self_info=sender)
+                finally:
+                    peer_bus.MAX_BODY = old
+
+
 if __name__ == "__main__":
     unittest.main()
