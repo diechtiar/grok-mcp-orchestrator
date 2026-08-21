@@ -7,7 +7,7 @@
 - CI runs unittest before smoke
 - Tests: MCP TRUST_NAME_KEYS refusal; body size cap; stale-send refusal
 - CONTRIBUTING.md
-- CI: `actions/checkout@v5` (Node 24 runtime)
+- CI: `actions/checkout@v5`, `actions/setup-python@v6` (Node 24 runtime)
 
 ## 0.6.4 — 2026-08-21
 
