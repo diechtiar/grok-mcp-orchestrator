@@ -2,7 +2,7 @@
 
 Cross-harness **ListAgents / SendMessage** for multi-session agent orchestration.
 
-**Version:** 0.6.1 · **License:** MIT · **Python:** 3.11+ (stdlib only)
+**Version:** 0.6.2 · **License:** MIT · **Python:** 3.11+ (stdlib only)
 
 Claude Code already has native `SendMessage` / `ListAgents`. This project gives **Grok** (and Claude) the same verbs over a small **filesystem bus**, plus a zero-dependency **stdio MCP server**.
 
@@ -186,6 +186,7 @@ Expect six tools and any live peers (or an empty table). If MCP fails to start, 
 | [SECURITY.md](SECURITY.md) | Trust model and mitigations |
 | [ROADMAP.md](ROADMAP.md) | Planned work |
 | [docs/playbook.md](docs/playbook.md) | Worked end-to-end playbook |
+| [docs/claude-wake-hook.md](docs/claude-wake-hook.md) | Claude wake-drop consumer |
 | [CHANGELOG.md](CHANGELOG.md) | Release notes |
 
 Optional discovery:

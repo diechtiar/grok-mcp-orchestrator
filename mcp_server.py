@@ -17,7 +17,7 @@ from typing import Any
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
 import peer_bus  # noqa: E402
 
-SERVER_INFO = {"name": "peer-bus", "version": "0.6.1"}
+SERVER_INFO = {"name": "peer-bus", "version": "0.6.2"}
 PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS = [

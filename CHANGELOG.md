@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2 — 2026-08-21
+
+- Claude wake-drop consumer sketch: `hooks/peer-bus-wake.sh` + `docs/claude-wake-hook.md`
+- Skill wording: wake is best-effort hint; pull still required
+
 ## 0.6.1 — 2026-08-21
 
 - GitHub Actions smoke workflow
