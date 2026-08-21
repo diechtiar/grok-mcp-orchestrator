@@ -16,6 +16,21 @@ sys.path.insert(0, str(ROOT))
 import peer_bus  # noqa: E402
 
 
+_SID_ENV = (
+    "GROK_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_SESSION_ID",
+    "PEER_BUS_SESSION_ID",
+    "PEER_BUS_ALLOW_SESSION_OVERRIDE",
+)
+
+
+def _cleared_sid_env(**set_values: str) -> dict[str, str]:
+    env = {k: v for k, v in os.environ.items() if k not in _SID_ENV}
+    env.update(set_values)
+    return env
+
+
 class SafeKeyTests(unittest.TestCase):
     def test_strips_traversal(self) -> None:
         self.assertNotIn("..", peer_bus._safe_key("../etc/passwd"))
@@ -24,26 +39,45 @@ class SafeKeyTests(unittest.TestCase):
     def test_empty_becomes_anon(self) -> None:
         self.assertEqual(peer_bus._safe_key(""), "anon")
 
+    def test_refuses_path_separators_in_result(self) -> None:
+        for raw in ("../etc/passwd", "foo/../../bar", r"alice\\bob", "a/b/c"):
+            key = peer_bus._safe_key(raw)
+            self.assertNotIn("/", key, raw)
+            self.assertNotIn("\\", key, raw)
+            self.assertNotIn("..", key, raw)
+
 
 class ClaudeSessionIdTests(unittest.TestCase):
     def test_prefers_claude_code_session_id(self) -> None:
-        with mock.patch.dict(
-            os.environ,
-            {"CLAUDE_CODE_SESSION_ID": "code-1", "CLAUDE_SESSION_ID": "legacy-1"},
-            clear=False,
-        ):
-            # clear grok id for this check
-            os.environ.pop("GROK_SESSION_ID", None)
+        env = _cleared_sid_env(
+            CLAUDE_CODE_SESSION_ID="code-1",
+            CLAUDE_SESSION_ID="legacy-1",
+        )
+        with mock.patch.dict(os.environ, env, clear=True):
             self.assertEqual(peer_bus._claude_session_id(), "code-1")
             self.assertEqual(peer_bus._session_id(), "code-1")
 
     def test_falls_back_to_claude_session_id(self) -> None:
-        env = {k: v for k, v in os.environ.items() if k not in {
-            "GROK_SESSION_ID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_SESSION_ID", "PEER_BUS_SESSION_ID"
-        }}
-        env["CLAUDE_SESSION_ID"] = "legacy-2"
+        env = _cleared_sid_env(CLAUDE_SESSION_ID="legacy-2")
         with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(peer_bus._claude_session_id(), "legacy-2")
             self.assertEqual(peer_bus._session_id(), "legacy-2")
+
+    def test_grok_session_id_beats_claude(self) -> None:
+        env = _cleared_sid_env(
+            GROK_SESSION_ID="grok-9",
+            CLAUDE_CODE_SESSION_ID="code-1",
+            CLAUDE_SESSION_ID="legacy-1",
+        )
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(peer_bus._claude_session_id(), "code-1")
+            self.assertEqual(peer_bus._session_id(), "grok-9")
+
+    def test_override_ignored_without_flag(self) -> None:
+        env = _cleared_sid_env(PEER_BUS_SESSION_ID="spoof")
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertIsNone(peer_bus._claude_session_id())
+            self.assertIsNone(peer_bus._session_id())
 
 
 class TempBusTestCase(unittest.TestCase):
@@ -56,7 +90,17 @@ class TempBusTestCase(unittest.TestCase):
             "PEER_BUS_WAKE_DROP": "1",
             "PEER_BUS_HARNESS": "test",
         }
-        # Reload module paths bound at import time — re-bind for this process
+        self._saved = {
+            "ROOT": peer_bus.ROOT,
+            "INBOX": peer_bus.INBOX,
+            "REGISTRY": peer_bus.REGISTRY,
+            "WAKE": peer_bus.WAKE,
+            "TRUST_NAME_KEYS": peer_bus.TRUST_NAME_KEYS,
+            "WAKE_DROP": peer_bus.WAKE_DROP,
+            "WAKE_ENABLED": peer_bus.WAKE_ENABLED,
+            "WAKE_CMD": peer_bus.WAKE_CMD,
+            "_WAKE_CALLBACK": peer_bus._WAKE_CALLBACK,
+        }
         peer_bus.ROOT = self.root.resolve()
         peer_bus.INBOX = peer_bus.ROOT / "inbox"
         peer_bus.REGISTRY = peer_bus.ROOT / "registry"
@@ -69,6 +113,8 @@ class TempBusTestCase(unittest.TestCase):
         peer_bus._ensure_dirs()
 
     def tearDown(self) -> None:
+        for name, value in self._saved.items():
+            setattr(peer_bus, name, value)
         self._tmpdir.cleanup()
 
     def test_send_recv_ack_wake_drop(self) -> None:
@@ -120,6 +166,50 @@ class CliSmokeTests(unittest.TestCase):
                 [sys.executable, str(ROOT / "peer_bus.py"), "watch", "--as", "Worker", "--once"],
                 env=env,
             )
+
+    def test_watch_once_empty_stdout(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="peer-bus-watch-") as tmp:
+            env = os.environ.copy()
+            env.update({"PEER_BUS_ROOT": tmp, "PEER_BUS_TRUST_NAME_KEYS": "1"})
+            out = subprocess.check_output(
+                [sys.executable, str(ROOT / "peer_bus.py"), "watch", "--as", "Worker", "--once"],
+                env=env,
+                text=True,
+            )
+            self.assertEqual(out, "")
+
+    def test_cli_trust_name_keys_send_recv_wake_drop(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="peer-bus-cli-send-") as tmp:
+            env = os.environ.copy()
+            env.update(
+                {
+                    "PEER_BUS_ROOT": tmp,
+                    "PEER_BUS_TRUST_NAME_KEYS": "1",
+                    "PEER_BUS_WAKE_DROP": "1",
+                }
+            )
+            pb = [sys.executable, str(ROOT / "peer_bus.py")]
+            send = subprocess.check_output(
+                pb + ["send", "--as", "Orchestra", "--to", "Worker", "--body", "cli-ping"],
+                env=env,
+                text=True,
+            )
+            payload = json.loads(send)
+            self.assertTrue(payload["ok"])
+            mid = payload["msg_id"]
+            key = payload["to"]["key"]
+            drop = Path(tmp) / "wake" / f"{key}.json"
+            self.assertTrue(drop.is_file(), drop)
+            self.assertEqual(json.loads(drop.read_text())["msg_id"], mid)
+            recv = subprocess.check_output(
+                pb + ["recv", "--as", "Worker", "--json"],
+                env=env,
+                text=True,
+            )
+            msgs = json.loads(recv)
+            self.assertEqual(len(msgs), 1)
+            self.assertEqual(msgs[0]["msg_id"], mid)
+            self.assertIn("cli-ping", msgs[0].get("body_raw") or msgs[0].get("body") or "")
 
 
 
