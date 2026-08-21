@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.3 — 2026-08-21
+
+- Claude wake hook tightened for Claude Code 2.1.238: stdin `session_id` / `$CLAUDE_CODE_SESSION_ID`, JSON `additionalContext`, settings fragment with `timeout` and no `UserPromptSubmit` matcher
+
 ## 0.6.2 — 2026-08-21
 
 - Claude wake-drop consumer sketch: `hooks/peer-bus-wake.sh` + `docs/claude-wake-hook.md`

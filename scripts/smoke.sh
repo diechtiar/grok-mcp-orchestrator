@@ -23,6 +23,32 @@ key=$("${PB[@]}" whoami --as Worker | python3 -c 'import json,sys; print(json.lo
 test -f "$PEER_BUS_ROOT/wake/${key}.json"
 echo "smoke ok ROOT=$PEER_BUS_ROOT"
 
+# Claude wake-hook consumer (UserPromptSubmit JSON, CLI 2.1.238 shape)
+chmod +x "$ROOT/hooks/peer-bus-wake.sh"
+hook_sid="00893aaf-19fa-41d2-8238-13269b9b3ca0"
+hook_key=$(python3 -c 'import re,sys
+text=sys.argv[1].strip().lower()
+text=re.sub(r"[^a-z0-9._+-]+","-",text).strip(".-+")
+text=re.sub(r"\.{2,}",".",text)
+print(text[:80] or "anon")' "$hook_sid")
+printf '%s\n' '{"msg_id":"hook-smoke-1","summary":"hook"}' >"$PEER_BUS_ROOT/wake/${hook_key}.json"
+hook_out=$(printf '%s' '{"session_id":"'"$hook_sid"'","hook_event_name":"UserPromptSubmit","prompt":"x"}' \
+  | PEER_BUS_CLAUDE_WAKE=1 PEER_BUS_ROOT="$PEER_BUS_ROOT" bash "$ROOT/hooks/peer-bus-wake.sh")
+echo "$hook_out" | python3 -c 'import json,sys
+r=json.load(sys.stdin)
+assert r["hookSpecificOutput"]["hookEventName"]=="UserPromptSubmit"
+assert "hook-smoke-1" in r["hookSpecificOutput"]["additionalContext"]'
+# second fire with same msg_id must stay silent
+hook_out2=$(printf '%s' '{"session_id":"'"$hook_sid"'","hook_event_name":"UserPromptSubmit"}' \
+  | PEER_BUS_CLAUDE_WAKE=1 PEER_BUS_ROOT="$PEER_BUS_ROOT" bash "$ROOT/hooks/peer-bus-wake.sh")
+[[ -z "$hook_out2" ]]
+# disabled flag no-ops even with a drop
+hook_out3=$(printf '%s' '{"session_id":"'"$hook_sid"'","hook_event_name":"UserPromptSubmit"}' \
+  | PEER_BUS_ROOT="$PEER_BUS_ROOT" bash "$ROOT/hooks/peer-bus-wake.sh")
+[[ -z "$hook_out3" ]]
+echo "hook ok"
+
+
 # MCP stdio: initialize + tools/list (must refuse TRUST_NAME_KEYS)
 unset PEER_BUS_TRUST_NAME_KEYS
 mcp_out=$(printf '%s\n' \
