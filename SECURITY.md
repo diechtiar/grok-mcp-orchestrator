@@ -19,7 +19,7 @@ peer-bus is a **cooperative, same-user** agent bus. It is not a multi-tenant sec
 | Spoof inbox via MCP `as_name` | Removed — inbox key is session-bound |
 | `--as` / `display_name` | Display name only (strips forged `[ref]` suffixes); MCP has no inbox switch |
 | `PEER_BUS_TRUST_NAME_KEYS` | CLI smoke only — **MCP refuses to start** if set |
-| Session id source | `GROK_SESSION_ID` / `CLAUDE_SESSION_ID` only; `PEER_BUS_SESSION_ID` needs `PEER_BUS_ALLOW_SESSION_OVERRIDE=1` |
+| Session id source | `GROK_SESSION_ID` / `CLAUDE_SESSION_ID` / `CLAUDE_CODE_SESSION_ID`; `PEER_BUS_SESSION_ID` needs `PEER_BUS_ALLOW_SESSION_OVERRIDE=1` |
 | Stale recipients | Send targets **live** agents by default; `PEER_BUS_ALLOW_STALE_SEND=1` to override |
 | Body size | Capped (`PEER_BUS_MAX_BODY`, hard ceiling 64KiB) |
 | Inbox flood | Soft cap `PEER_BUS_MAX_INBOX_FILES` (default 200) |

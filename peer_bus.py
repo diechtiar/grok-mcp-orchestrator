@@ -10,8 +10,8 @@ Optional discovery (skip if unset / missing):
 
 Security (v0.4):
   - Inbox keys are session-bound when a harness session id is available (not spoofable via --as).
-  - Session id from GROK_SESSION_ID / CLAUDE_SESSION_ID only; PEER_BUS_SESSION_ID needs
-    PEER_BUS_ALLOW_SESSION_OVERRIDE=1 (off by default).
+  - Session id from GROK_SESSION_ID / CLAUDE_SESSION_ID / CLAUDE_CODE_SESSION_ID only;
+    PEER_BUS_SESSION_ID needs PEER_BUS_ALLOW_SESSION_OVERRIDE=1 (off by default).
   - All inbox/registry paths are re-slugged and must resolve under the bus root (no traversal).
   - Symlink inbox directories are refused.
   - send() targets live agents by default (PEER_BUS_ALLOW_STALE_SEND=1 to include stale).
@@ -295,9 +295,14 @@ def _registry_path(key_raw: str) -> Path:
     return path
 
 
+def _claude_session_id() -> str | None:
+    """Claude Code may inject CLAUDE_CODE_SESSION_ID (2.1.x) or CLAUDE_SESSION_ID."""
+    return os.environ.get("CLAUDE_CODE_SESSION_ID") or os.environ.get("CLAUDE_SESSION_ID")
+
+
 def _session_id() -> str | None:
     """Harness-injected ids only, unless PEER_BUS_ALLOW_SESSION_OVERRIDE=1."""
-    sid = os.environ.get("GROK_SESSION_ID") or os.environ.get("CLAUDE_SESSION_ID")
+    sid = os.environ.get("GROK_SESSION_ID") or _claude_session_id()
     if sid:
         return sid
     if ALLOW_SESSION_OVERRIDE:
@@ -328,7 +333,7 @@ def detect_self(display_name: str | None = None) -> dict[str, Any]:
                 harness = harness or "grok"
                 break
 
-    if os.environ.get("CLAUDE_SESSION_ID") and not harness:
+    if _claude_session_id() and not harness:
         harness = "claude"
 
     name = _safe_display_name(display_name) or _safe_display_name(env_name) or _safe_display_name(title)
@@ -356,7 +361,7 @@ def detect_self(display_name: str | None = None) -> dict[str, Any]:
             "grok"
             if os.environ.get("GROK_SESSION_ID")
             else "claude"
-            if os.environ.get("CLAUDE_SESSION_ID")
+            if _claude_session_id()
             else "override"
             if sid and ALLOW_SESSION_OVERRIDE
             else None

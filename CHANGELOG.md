@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.4 — 2026-08-21
+
+- Accept `CLAUDE_CODE_SESSION_ID` as Claude harness session id (MCP/hooks on Code 2.1.x)
+
 ## 0.6.3 — 2026-08-21
 
 - Claude wake hook tightened for Claude Code 2.1.238: stdin `session_id` / `$CLAUDE_CODE_SESSION_ID`, JSON `additionalContext`, settings fragment with `timeout` and no `UserPromptSubmit` matcher
