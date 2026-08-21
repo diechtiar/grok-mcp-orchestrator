@@ -2,7 +2,7 @@
 
 Cross-harness **ListAgents / SendMessage** for multi-session agent orchestration.
 
-**Version:** 0.6.4 · **License:** MIT · **Python:** 3.11+ (stdlib only)
+**Version:** 0.6.5 · **License:** MIT · **Python:** 3.11+ (stdlib only)
 
 Claude Code already has native `SendMessage` / `ListAgents`. This project gives **Grok** (and Claude) the same verbs over a small **filesystem bus**, plus a zero-dependency **stdio MCP server**.
 
@@ -58,6 +58,8 @@ python3 peer_bus.py ack <msg_id>
 # monitor-friendly watch (one line per new unread; backoff when idle)
 python3 peer_bus.py watch
 # → <msg_id>\t<from.address>
+
+python3 peer_bus.py version
 ```
 
 Local smoke with two name-keyed personas on one process (**dev only**):
@@ -180,6 +182,8 @@ Expect six tools and any live peers (or an empty table). If MCP fails to start, 
 | `peer_bus.py` | Library + CLI (`watch`, `send`, `recv`, …) |
 | `mcp_server.py` | JSON-RPC MCP over stdio (no PyPI deps) |
 | `skills/peer-bus/SKILL.md` | Agent skill stub (triggers + `@v1` pointer) |
+| `tests/test_peer_bus.py` | stdlib unit tests |
+| `scripts/smoke.sh` | End-to-end CLI/MCP/hook smoke |
 | `$PEER_BUS_ROOT/inbox/<key>/` | Unread messages |
 | `$PEER_BUS_ROOT/registry/` | Heartbeats |
 | `$PEER_BUS_ROOT/wake/<key>.json` | Last-wake marker (best-effort) |

@@ -27,6 +27,7 @@ CLI:
   peer-bus ack MSG_ID
   peer-bus heartbeat [--as DISPLAY]
   peer-bus watch [--interval SEC] [--max-interval SEC] [--once]
+  peer-bus version
 """
 from __future__ import annotations
 
@@ -40,6 +41,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+PEER_BUS_VERSION = "0.6.5"
 
 
 def _default_root() -> Path:
@@ -765,6 +768,12 @@ def ack_message(msg_id: str, self_info: dict[str, Any] | None = None) -> dict[st
 # ---------- CLI ----------
 
 
+
+def _cmd_version(args: argparse.Namespace) -> int:
+    print(PEER_BUS_VERSION)
+    return 0
+
+
 def _cmd_whoami(args: argparse.Namespace) -> int:
     me = detect_self(args.as_name)
     heartbeat(me)
@@ -888,6 +897,9 @@ def _add_as(p: argparse.ArgumentParser) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="peer-bus", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("version", help="print peer-bus version")
+    p.set_defaults(func=_cmd_version)
 
     p = sub.add_parser("whoami")
     _add_as(p)

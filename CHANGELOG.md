@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.5 — 2026-08-21
+
+- `peer-bus version` CLI
+- stdlib `tests/test_peer_bus.py` (safe key, Claude session id, send/recv/ack/wake, symlink refuse)
+- CI runs unittest before smoke
+
 ## 0.6.4 — 2026-08-21
 
 - Accept `CLAUDE_CODE_SESSION_ID` as Claude harness session id (MCP/hooks on Code 2.1.x)
