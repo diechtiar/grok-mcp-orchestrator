@@ -18,6 +18,6 @@ Tracked on the [GitHub Project](https://github.com/users/diechtiar/projects/4).
 ## Open
 
 1. **P3 — Native Grok dashboard inject** — product-side wake if APIs land.
-2. **Hardening** — automated smoke/CI for CLI verbs (in progress with peer sessions).
+2. ~~**Hardening** — automated smoke/CI~~ — `scripts/smoke.sh` + `.github/workflows/smoke.yml` (**v0.6.1**).
 
 Issues remain open until the operator closes them; roadmap checkboxes track shipped code/docs only.

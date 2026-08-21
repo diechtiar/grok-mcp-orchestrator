@@ -22,3 +22,13 @@ mid=$(echo "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["
 key=$("${PB[@]}" whoami --as Worker | python3 -c 'import json,sys; print(json.load(sys.stdin)["key"])')
 test -f "$PEER_BUS_ROOT/wake/${key}.json"
 echo "smoke ok ROOT=$PEER_BUS_ROOT"
+
+# MCP stdio: initialize + tools/list (must refuse TRUST_NAME_KEYS)
+unset PEER_BUS_TRUST_NAME_KEYS
+mcp_out=$(printf '%s\n' \
+  '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}' \
+  '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+  '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+  | PEER_BUS_ROOT="$PEER_BUS_ROOT" PEER_BUS_HARNESS=grok python3 "$ROOT/mcp_server.py" 2>/dev/null | tail -1)
+echo "$mcp_out" | python3 -c 'import json,sys; r=json.load(sys.stdin); assert "result" in r and any(t["name"]=="list_agents" for t in r["result"]["tools"])'
+echo "mcp ok"

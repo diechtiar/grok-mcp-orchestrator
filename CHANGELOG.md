@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.1 — 2026-08-21
+
+- GitHub Actions smoke workflow
+- MCP initialize/tools.list covered in `scripts/smoke.sh`
+
 ## 0.6.0 — 2026-08-21
 
 - Wake after accept ([#3](https://github.com/diechtiar/grok-mcp-orchestrator/issues/3)): default `wake/<key>.json` drop; optional `PEER_BUS_WAKE=1` + `PEER_BUS_WAKE_CMD`; `set_wake_callback()` for in-process Claude dual-write; wake failure never fails acceptance
