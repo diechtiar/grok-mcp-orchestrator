@@ -8,13 +8,16 @@ Optional discovery (skip if unset / missing):
   $PEER_BUS_USAGE_DIR or $USAGE_DIR  — Claude-style statusline snapshots
   $GROK_HOME (default ~/.grok)       — Grok active_sessions.json + summaries
 
-Security (v0.3):
-  - Inbox keys are session-bound when a session id is available (not spoofable via --as).
+Security (v0.4):
+  - Inbox keys are session-bound when a harness session id is available (not spoofable via --as).
+  - Session id from GROK_SESSION_ID / CLAUDE_SESSION_ID only; PEER_BUS_SESSION_ID needs
+    PEER_BUS_ALLOW_SESSION_OVERRIDE=1 (off by default).
   - All inbox/registry paths are re-slugged and must resolve under the bus root (no traversal).
   - Symlink inbox directories are refused.
+  - send() targets live agents by default (PEER_BUS_ALLOW_STALE_SEND=1 to include stale).
   - send() ok proves ACCEPTANCE only, never that a peer read the message.
   - --as / display_name only affects the human-readable from.name unless
-    PEER_BUS_TRUST_NAME_KEYS=1 (dev/smoke only — allows name-keyed inboxes).
+    PEER_BUS_TRUST_NAME_KEYS=1 (dev/smoke only; MCP refuses to run with it set).
 
 CLI:
   peer-bus whoami [--as DISPLAY]
@@ -69,20 +72,29 @@ HARD_MAX_BODY = 64_000
 MAX_BODY = min(int(os.environ.get("PEER_BUS_MAX_BODY", "48000")), HARD_MAX_BODY)
 MAX_INBOX_FILES = int(os.environ.get("PEER_BUS_MAX_INBOX_FILES", "200"))
 TRUST_NAME_KEYS = os.environ.get("PEER_BUS_TRUST_NAME_KEYS", "").lower() in {"1", "true", "yes"}
+ALLOW_SESSION_OVERRIDE = os.environ.get("PEER_BUS_ALLOW_SESSION_OVERRIDE", "").lower() in {
+    "1",
+    "true",
+    "yes",
+}
+ALLOW_STALE_SEND = os.environ.get("PEER_BUS_ALLOW_STALE_SEND", "").lower() in {"1", "true", "yes"}
+MAX_DISPLAY_NAME = 64
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _ensure_dirs() -> None:
+    ROOT.mkdir(parents=True, exist_ok=True)
     INBOX.mkdir(parents=True, exist_ok=True)
     REGISTRY.mkdir(parents=True, exist_ok=True)
-    # Best-effort tighten bus dirs (shared volume may ignore mode)
-    try:
-        os.chmod(INBOX, 0o700)
-        os.chmod(REGISTRY, 0o700)
-    except OSError:
-        pass
+    # Best-effort tighten bus dirs (some mounts ignore mode)
+    for path in (ROOT, INBOX, REGISTRY):
+        try:
+            os.chmod(path, 0o700)
+        except OSError:
+            pass
 
 
 def _slug(text: str) -> str:
@@ -122,12 +134,23 @@ def _refuse_symlink(path: Path, label: str) -> None:
 
 def _safe_key(raw: str) -> str:
     key = _slug(raw)
-    if key in {"", ".", "..", "anon"} and _slug(raw) == "anon" and (raw or "").strip() not in {"", "anon"}:
-        # collapsed to anon from garbage — still ok, but reject pure traversal leftovers
-        pass
-    if "/" in key or "\\" in key or ".." in key.split("."):
+    if "/" in key or "\\" in key or key in {".", ".."}:
         raise ValueError(f"illegal key after slug: {raw!r} -> {key!r}")
     return key
+
+
+def _safe_display_name(raw: str | None) -> str | None:
+    """Display-only name: no fake address suffixes, bounded length."""
+    if raw is None:
+        return None
+    name = " ".join(str(raw).split())
+    if not name:
+        return None
+    # Prevent forging "Name [abcdef]" in from.name / address presentation
+    name = re.sub(r"\s*\[[0-9a-fA-F]{4,}\]\s*$", "", name).strip()
+    if len(name) > MAX_DISPLAY_NAME:
+        name = name[:MAX_DISPLAY_NAME].rstrip()
+    return name or None
 
 
 def _inbox_dir(key_raw: str, *, create: bool = True) -> Path:
@@ -162,12 +185,13 @@ def _registry_path(key_raw: str) -> Path:
 
 
 def _session_id() -> str | None:
-    return (
-        os.environ.get("GROK_SESSION_ID")
-        or os.environ.get("CLAUDE_SESSION_ID")
-        or os.environ.get("PEER_BUS_SESSION_ID")
-        or None
-    )
+    """Harness-injected ids only, unless PEER_BUS_ALLOW_SESSION_OVERRIDE=1."""
+    sid = os.environ.get("GROK_SESSION_ID") or os.environ.get("CLAUDE_SESSION_ID")
+    if sid:
+        return sid
+    if ALLOW_SESSION_OVERRIDE:
+        return os.environ.get("PEER_BUS_SESSION_ID") or None
+    return None
 
 
 def detect_self(display_name: str | None = None) -> dict[str, Any]:
@@ -196,7 +220,7 @@ def detect_self(display_name: str | None = None) -> dict[str, Any]:
     if os.environ.get("CLAUDE_SESSION_ID") and not harness:
         harness = "claude"
 
-    name = display_name or env_name or title
+    name = _safe_display_name(display_name) or _safe_display_name(env_name) or _safe_display_name(title)
     if not name:
         name = f"grok-{sid[:8]}" if sid else f"anon-{uuid.uuid4().hex[:8]}"
 
@@ -217,6 +241,15 @@ def detect_self(display_name: str | None = None) -> dict[str, Any]:
         "cwd": os.getcwd(),
         "title": title,
         "name_keys": TRUST_NAME_KEYS,
+        "session_id_source": (
+            "grok"
+            if os.environ.get("GROK_SESSION_ID")
+            else "claude"
+            if os.environ.get("CLAUDE_SESSION_ID")
+            else "override"
+            if sid and ALLOW_SESSION_OVERRIDE
+            else None
+        ),
     }
 
 
@@ -382,14 +415,22 @@ def list_agents(include_stale: bool = False) -> list[dict[str, Any]]:
     return merged
 
 
-def resolve_recipient(to: str, agents: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    agents = agents if agents is not None else list_agents(include_stale=True)
+def resolve_recipient(
+    to: str,
+    agents: list[dict[str, Any]] | None = None,
+    *,
+    allow_stale: bool | None = None,
+) -> dict[str, Any]:
+    stale_ok = ALLOW_STALE_SEND if allow_stale is None else allow_stale
+    agents = agents if agents is not None else list_agents(include_stale=stale_ok)
     raw = to.strip()
     m = re.match(r"^(.*?)\s*\[([0-9a-fA-F]{4,})\]\s*$", raw)
     name_part, ref_part = (m.group(1).strip(), m.group(2).lower()) if m else (raw, None)
 
     matches: list[dict[str, Any]] = []
     for a in agents:
+        if not stale_ok and a.get("state") == "stale":
+            continue
         sid = str(a.get("session_id") or "")
         key = str(a.get("key") or "")
         if raw == sid or raw == key or raw.lower() == sid.lower():
@@ -403,6 +444,21 @@ def resolve_recipient(to: str, agents: list[dict[str, Any]] | None = None) -> di
             matches.append(a)
 
     if not matches:
+        if not stale_ok:
+            # Retry once including stale to give a clearer error
+            stale_agents = list_agents(include_stale=True)
+            stale_hit = False
+            for a in stale_agents:
+                if a.get("state") != "stale":
+                    continue
+                sid = str(a.get("session_id") or "")
+                if raw == sid or name_part == a.get("name") or (ref_part and sid.lower().startswith(ref_part)):
+                    stale_hit = True
+                    break
+            if stale_hit:
+                raise ValueError(
+                    f"recipient {raw!r} is stale/offline; set PEER_BUS_ALLOW_STALE_SEND=1 to send anyway"
+                )
         if not TRUST_NAME_KEYS:
             raise ValueError(
                 f"unknown recipient {raw!r}; list_agents first, or set "
@@ -474,8 +530,11 @@ def send_message(
             "key": me["key"],
             "name": me["name"],
             "session_id": me.get("session_id"),
+            "session_id_source": me.get("session_id_source"),
             "harness": me.get("harness"),
             "address": f"{me['name']} [{(me.get('session_id') or me['key'])[:6]}]",
+            # Claim only: harness env provided the session id (not PEER_BUS_SESSION_OVERRIDE)
+            "session_bound": me.get("session_id_source") in {"grok", "claude"},
         },
         "to": {
             "key": recipient["key"],
@@ -540,8 +599,14 @@ def receive_messages(
             continue
         if unread_only and data.get("read"):
             continue
-        # Do not echo absolute paths into model context by default — keep optional
+        data = dict(data)
         data["_path"] = str(path)
+        data["untrusted"] = True
+        # Safe view for model context (CLI/MCP can prefer these)
+        body = data.get("body") if isinstance(data.get("body"), str) else ""
+        data["body_for_model"] = (
+            "<<<UNTRUSTED_PEER_MESSAGE>>>\n" + body + "\n<<<END_UNTRUSTED_PEER_MESSAGE>>>"
+        )
         out.append(data)
         if len(out) >= max(1, min(limit, 100)):
             break

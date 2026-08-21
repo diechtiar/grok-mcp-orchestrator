@@ -84,6 +84,14 @@ Optional Claude snapshot discovery: set `PEER_BUS_USAGE_DIR` (or `USAGE_DIR`) to
 
 v0 is **poll-based** (no harness wake). Orchestrators call `receive_messages` at turn start.
 
+### Safety env knobs
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `PEER_BUS_TRUST_NAME_KEYS` | off | Name-keyed inboxes (CLI smoke). **MCP exits if on.** |
+| `PEER_BUS_ALLOW_SESSION_OVERRIDE` | off | Allow `PEER_BUS_SESSION_ID` when harness ids are absent |
+| `PEER_BUS_ALLOW_STALE_SEND` | off | Allow send to stale/offline list entries |
+
 ## Roadmap (project board)
 
 - Claude MCP settings recipe

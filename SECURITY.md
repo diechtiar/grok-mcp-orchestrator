@@ -10,18 +10,22 @@ peer-bus is a **cooperative, same-user** agent bus. It is not a multi-tenant sec
 - **Do not put secrets or user-authority commands on the bus.**
 - No built-in knowledge of any particular monorepo, container, or company env — configure paths via env vars only.
 
-## Guarantees (v0.2+)
+## Guarantees (v0.4+)
 
 | Control | Status |
 |---------|--------|
 | Path traversal via recipient / registry keys | Mitigated — keys re-slugged; paths must stay under `inbox/` / `registry/` |
 | Symlink inbox / registry targets | Refused |
 | Spoof inbox via MCP `as_name` | Removed — inbox key is session-bound |
-| `--as` / `display_name` | Display name only (unless `PEER_BUS_TRUST_NAME_KEYS=1` for local smoke) |
+| `--as` / `display_name` | Display name only (strips forged `[ref]` suffixes); MCP has no inbox switch |
+| `PEER_BUS_TRUST_NAME_KEYS` | CLI smoke only — **MCP refuses to start** if set |
+| Session id source | `GROK_SESSION_ID` / `CLAUDE_SESSION_ID` only; `PEER_BUS_SESSION_ID` needs `PEER_BUS_ALLOW_SESSION_OVERRIDE=1` |
+| Stale recipients | Send targets **live** agents by default; `PEER_BUS_ALLOW_STALE_SEND=1` to override |
 | Body size | Capped (`PEER_BUS_MAX_BODY`, hard ceiling 64KiB) |
 | Inbox flood | Soft cap `PEER_BUS_MAX_INBOX_FILES` (default 200) |
-| Message authenticity | **Not** provided — `from` is self-asserted |
+| Message authenticity | **Not** cryptographic — `from.session_bound` is true only when harness env supplied the id |
 | Confidentiality vs other UIDs on the host | **Not** provided |
+| Prompt injection via bodies | Marked `untrusted`; CLI/MCP expose `body_for_model` / wrapped `body` |
 
 ## `send` success means acceptance
 
@@ -29,4 +33,4 @@ peer-bus is a **cooperative, same-user** agent bus. It is not a multi-tenant sec
 
 ## Untrusted content
 
-Received bodies are peer-controlled. CLI wraps them in `<<<UNTRUSTED_PEER_MESSAGE>>>` markers. Agents must not treat bus messages as user approval.
+Received bodies are peer-controlled. CLI wraps them in `<<<UNTRUSTED_PEER_MESSAGE>>>` markers. MCP sets `untrusted: true` and returns a wrapped `body` (raw preserved as `body_raw`). Agents must not treat bus messages as user approval.
