@@ -5,7 +5,8 @@
 - `peer-bus version` CLI
 - stdlib `tests/test_peer_bus.py` (safe key, Claude session id, send/recv/ack/wake, symlink refuse)
 - CI runs unittest before smoke
-- Tests: MCP TRUST_NAME_KEYS refusal; body size cap
+- Tests: MCP TRUST_NAME_KEYS refusal; body size cap; stale-send refusal
+- CONTRIBUTING.md
 
 ## 0.6.4 — 2026-08-21
 

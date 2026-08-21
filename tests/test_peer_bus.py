@@ -163,5 +163,28 @@ class BodyCapTests(unittest.TestCase):
                     peer_bus.MAX_BODY = old
 
 
+
+class StaleSendTests(unittest.TestCase):
+    def test_send_to_unknown_without_stale_flag_fails(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="peer-bus-stale-") as tmp:
+            root = Path(tmp)
+            peer_bus.ROOT = root.resolve()
+            peer_bus.INBOX = peer_bus.ROOT / "inbox"
+            peer_bus.REGISTRY = peer_bus.ROOT / "registry"
+            peer_bus.WAKE = peer_bus.ROOT / "wake"
+            peer_bus.TRUST_NAME_KEYS = False
+            peer_bus.ALLOW_STALE_SEND = False
+            peer_bus._ensure_dirs()
+            env = {"PEER_BUS_ROOT": tmp}
+            os.environ.pop("PEER_BUS_TRUST_NAME_KEYS", None)
+            with mock.patch.dict(os.environ, env, clear=False):
+                # Force non-name-key mode: resolve_recipient needs live list
+                peer_bus.TRUST_NAME_KEYS = False
+                sender = peer_bus.detect_self("Rick")
+                # Without live peer, resolve should fail
+                with self.assertRaises(ValueError):
+                    peer_bus.send_message("Nobody [dead00]", "x", self_info=sender)
+
+
 if __name__ == "__main__":
     unittest.main()
