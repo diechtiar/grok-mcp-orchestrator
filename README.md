@@ -2,7 +2,7 @@
 
 Cross-harness **ListAgents / SendMessage** for multi-session agent orchestration.
 
-**Version:** 0.9.8 · **License:** MIT · **Python:** 3.11+ (stdlib only)
+**Version:** 0.9.9 · **License:** MIT · **Python:** 3.11+ (stdlib only)
 
 Claude Code already has native `SendMessage` / `ListAgents`. This project gives **Grok** (and Claude) the same verbs over a small **filesystem bus**, plus a zero-dependency **stdio MCP server**.
 
@@ -14,7 +14,7 @@ Project board: https://github.com/users/diechtiar/projects/4
 
 ## Features
 
-- Discover live peers (`list` / `flock`: tmux pane title + pid, Herdr `agents`, Grok actives with a live pid, usage overlay; registry is not presence). 5h quota is one `pool` header, not a per-row figure; per-seat discriminator is `context`.
+- Discover live peers (`list` / `flock`: tmux pane title + pid, Herdr `agents`, Grok actives with a live pid, usage overlay; registry is not presence). Quota is one `pool` header (`five_hour` and `seven_day`, each with its own reset; `state` live|stale from snapshot age). Per-seat discriminator is `context`.
 - Send / receive / ack messages (**acceptance ≠ delivery**). Recv is newest-first; ack consumes.
 - `watch` — inotify on Linux (poll fallback); one line per new unread (`msg_id` + `from.address`)
 - `mail` — unread count, no bodies (statuslines use this)

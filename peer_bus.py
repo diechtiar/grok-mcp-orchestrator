@@ -48,7 +48,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-PEER_BUS_VERSION = "0.9.8"
+PEER_BUS_VERSION = "0.9.9"
 
 
 def _default_root() -> Path:
@@ -1307,18 +1307,40 @@ def _overlay_context(row: dict[str, Any], usage: dict[str, Any]) -> None:
     row["context"] = text
 
 
-def pool_usage(now: float | None = None) -> dict[str, Any] | None:
-    """Account-wide 5h pool from the newest unexpired usage snapshot.
+def _epoch_from_ts(ts: str) -> float | None:
+    raw = (ts or "").strip()
+    if not raw:
+        return None
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        return datetime.fromisoformat(raw).timestamp()
+    except ValueError:
+        return None
 
-    The 5-hour figure is one shared pool, not a per-seat cost. Samples whose
-    `five_hour_resets_at` is in the past are void (same predicate as
-    usage-guard `pool_samples()`).
+
+def _window_live(reset: Any, now_f: float) -> bool:
+    try:
+        return float(reset) > now_f
+    except (TypeError, ValueError):
+        return False
+
+
+def pool_usage(now: float | None = None) -> dict[str, Any] | None:
+    """Account-wide quota pool from the newest usage snapshot.
+
+    `five_hour` and `seven_day` are independent windows: an expired 5h reset
+    does not drop a still-valid 7d figure from the same file. `state` is
+    live|stale from snapshot age (same 5 min threshold as per-seat context~).
+    `resets_at` remains the 5h reset (compat); `five_hour_resets_at` and
+    `seven_day_resets_at` are explicit.
     """
     usage_dir = USAGE_DIR
     if usage_dir is None or not usage_dir.is_dir():
         return None
     now_f = time.time() if now is None else now
-    best: dict[str, Any] | None = None
+    best_data: dict[str, Any] | None = None
+    best_path: Path | None = None
     best_ts = ""
     for path in usage_dir.glob("*.json"):
         if path.name.startswith(".") or path.stem in _USAGE_SKIP_STEMS:
@@ -1328,25 +1350,40 @@ def pool_usage(now: float | None = None) -> dict[str, Any] | None:
         data = _read_json(path)
         if not data:
             continue
-        reset = data.get("five_hour_resets_at")
-        try:
-            reset_f = float(reset)
-        except (TypeError, ValueError):
-            continue
-        if reset_f <= now_f:
-            continue
         ts = str(data.get("ts") or "")
-        if ts < best_ts:
+        if not ts or ts < best_ts:
             continue
         best_ts = ts
-        best = {
-            "five_hour": _fmt_pct(data.get("five_hour")),
-            "resets_at": reset_f,
-            "ts": ts,
-            "source_name": data.get("name") or data.get("session_name"),
-            "source_session": data.get("session") or data.get("session_id") or path.stem,
-        }
-    return best
+        best_data = data
+        best_path = path
+    if not best_data or not best_path:
+        return None
+    five_reset = best_data.get("five_hour_resets_at")
+    seven_reset = best_data.get("seven_day_resets_at")
+    five_live = _window_live(five_reset, now_f)
+    seven_live = _window_live(seven_reset, now_f)
+    epoch = _epoch_from_ts(best_ts)
+    if epoch is None:
+        try:
+            epoch = best_path.stat().st_mtime
+        except OSError:
+            epoch = now_f
+    age_min = max(0.0, (now_f - epoch) / 60.0)
+    stale = age_min > _CONTEXT_STALE_MIN
+    five_reset_f = float(five_reset) if five_live else None
+    seven_reset_f = float(seven_reset) if seven_live else None
+    return {
+        "five_hour": _fmt_pct(best_data.get("five_hour")) if five_live else None,
+        "seven_day": _fmt_pct(best_data.get("seven_day")) if seven_live else None,
+        "resets_at": five_reset_f,
+        "five_hour_resets_at": five_reset_f,
+        "seven_day_resets_at": seven_reset_f,
+        "ts": best_ts,
+        "age_min": round(age_min, 1),
+        "state": "stale" if stale else "live",
+        "source_name": best_data.get("name") or best_data.get("session_name"),
+        "source_session": best_data.get("session") or best_data.get("session_id") or best_path.stem,
+    }
 
 
 def roster(include_stale: bool = False) -> dict[str, Any]:
@@ -2012,11 +2049,17 @@ def _cmd_list(args: argparse.Namespace) -> int:
         print(json.dumps(view, indent=2))
         return 0
     pool = view.get("pool") if isinstance(view.get("pool"), dict) else None
-    pct = pool.get("five_hour") if pool else None
-    if pct:
-        print(f"POOL 5h {pct}%  (account-wide; not per seat)")
+    if not pool:
+        print("POOL —  (no sample)")
     else:
-        print("POOL 5h —  (no unexpired sample)")
+        five = pool.get("five_hour")
+        seven = pool.get("seven_day")
+        st = pool.get("state") or "live"
+        age = pool.get("age_min")
+        five_s = f"{five}%" if five else "—"
+        seven_s = f"{seven}%" if seven else "—"
+        age_s = f"{age} min" if age is not None else "?"
+        print(f"POOL 5h {five_s}  7d {seven_s}  {st} ({age_s}; account-wide)")
     agents = view.get("agents") or []
     if not agents:
         print("no agents found")

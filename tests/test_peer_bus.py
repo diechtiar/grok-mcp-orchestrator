@@ -10,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
@@ -779,14 +780,19 @@ class RosterTests(unittest.TestCase):
             )
             + "\n"
         )
+        fresh = datetime.fromtimestamp(now - 30, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
         (peer_bus.USAGE_DIR / "new.json").write_text(
             json.dumps(
                 {
-                    "ts": "2026-09-07T18:00:00Z",
+                    "ts": fresh,
                     "name": "Ada",
                     "session": "c662b3ea-d616-4c37-8a78-74ae8272b578",
                     "five_hour": "48.2",
                     "five_hour_resets_at": now + 3600,
+                    "seven_day": "61.4",
+                    "seven_day_resets_at": now + 86400,
                     "context": "16",
                 }
             )
@@ -795,6 +801,8 @@ class RosterTests(unittest.TestCase):
         pool = peer_bus.pool_usage(now=now)
         self.assertIsNotNone(pool)
         self.assertEqual(pool["five_hour"], "48")
+        self.assertEqual(pool["seven_day"], "61")
+        self.assertEqual(pool["state"], "live")
         self.assertEqual(pool["source_name"], "Ada")
         with mock.patch.object(peer_bus, "_tmux_seats", return_value=[]):
             with mock.patch.object(peer_bus, "_grok_agents", return_value=[]):
@@ -805,7 +813,54 @@ class RosterTests(unittest.TestCase):
         self.assertNotIn("five_hour", rows["Gus"])
         self.assertEqual(rows["Ada"]["context"], "16")
         self.assertEqual(view["pool"]["five_hour"], "48")
+        self.assertEqual(view["pool"]["seven_day"], "61")
+        self.assertEqual(view["pool"]["state"], "live")
         self.assertNotIn("five_hour", view["agents"][0])
+        self.assertNotIn("seven_day", view["agents"][0])
+
+    def test_pool_keeps_seven_day_when_five_hour_window_expired(self) -> None:
+        now = time.time()
+        (peer_bus.USAGE_DIR / "snap.json").write_text(
+            json.dumps(
+                {
+                    "ts": datetime.fromtimestamp(now - 30, tz=timezone.utc).strftime(
+                        "%Y-%m-%dT%H:%M:%SZ"
+                    ),
+                    "name": "Ada",
+                    "session": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                    "five_hour": "90",
+                    "five_hour_resets_at": now - 10,
+                    "seven_day": "40",
+                    "seven_day_resets_at": now + 86400,
+                }
+            )
+        )
+        pool = peer_bus.pool_usage(now=now)
+        self.assertIsNotNone(pool)
+        self.assertIsNone(pool["five_hour"])
+        self.assertEqual(pool["seven_day"], "40")
+
+    def test_pool_marks_stale_when_snapshot_is_old(self) -> None:
+        now = time.time()
+        old_ts = datetime.fromtimestamp(now - 12 * 60, tz=timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        (peer_bus.USAGE_DIR / "snap.json").write_text(
+            json.dumps(
+                {
+                    "ts": old_ts,
+                    "name": "Ada",
+                    "session": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                    "five_hour": "20",
+                    "five_hour_resets_at": now + 3600,
+                    "seven_day": "30",
+                    "seven_day_resets_at": now + 86400,
+                }
+            )
+        )
+        pool = peer_bus.pool_usage(now=now)
+        self.assertEqual(pool["state"], "stale")
+        self.assertGreater(pool["age_min"], 5)
 
     def test_context_marks_stale_snapshot(self) -> None:
         row: dict = {}

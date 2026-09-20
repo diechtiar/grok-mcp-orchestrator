@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.9 — 2026-09-20
+
+- `pool` includes `seven_day` / `seven_day_resets_at` beside `five_hour`. Each
+  window is omitted when its own reset is in the past; an expired 5h sample no
+  longer hides a live 7d figure.
+- `pool.state` is `live` or `stale` from snapshot age (same 5 min threshold as
+  per-seat `context~`), plus `age_min`. CLI prints both windows and the state.
+
 ## 0.9.8 — 2026-09-20
 
 - Pinned JSON schema for multiplexer `agent list`, `pane list`, and `process-info`.

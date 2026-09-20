@@ -17,13 +17,13 @@ from typing import Any
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
 import peer_bus  # noqa: E402
 
-SERVER_INFO = {"name": "peer-bus", "version": "0.9.8"}
+SERVER_INFO = {"name": "peer-bus", "version": "0.9.9"}
 PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS = [
     {
         "name": "list_agents",
-        "description": "Live flock as {pool, agents}. 5h quota is one account-wide pool (not per row); per-seat discriminator is context. Send with name [ref] on collisions.",
+        "description": "Live flock as {pool, agents}. pool has five_hour and seven_day (each with its own reset) plus state live|stale from snapshot age. Per-seat discriminator is context. Send with name [ref] on collisions.",
         "inputSchema": {
             "type": "object",
             "properties": {"include_stale": {"type": "boolean", "default": False}},
