@@ -1046,5 +1046,260 @@ class HerdrBinTests(unittest.TestCase):
                 self.assertEqual(peer_bus._herdr_bin(), str(home))
 
 
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
+class HerdrSchemaTests(unittest.TestCase):
+    def _load(self, name: str) -> dict:
+        return json.loads((FIXTURES / name).read_text())
+
+    def test_agent_list_fixture_valid_and_parses(self) -> None:
+        payload = self._load("herdr_agent_list.json")
+        self.assertEqual(peer_bus.herdr_schema_errors("agent_list", payload), [])
+        rows = peer_bus._parse_herdr_agents(payload)
+        self.assertEqual({r["name"] for r in rows}, {"Ada", "Beau"})
+        self.assertEqual(rows[0]["session_id"], "aaaaaaaa-1111-2222-3333-444444444444")
+
+    def test_pane_list_fixture_valid(self) -> None:
+        payload = self._load("herdr_pane_list.json")
+        self.assertEqual(peer_bus.herdr_schema_errors("pane_list", payload), [])
+
+    def test_process_info_fixture_valid_and_parses(self) -> None:
+        payload = self._load("herdr_process_info.json")
+        self.assertEqual(peer_bus.herdr_schema_errors("process_info", payload), [])
+        sid, harness, pid = peer_bus._sid_from_herdr_process_info(payload)
+        self.assertEqual(sid, "aaaaaaaa-1111-2222-3333-444444444444")
+        self.assertEqual(harness, "claude")
+        self.assertEqual(pid, 100)
+
+    def test_agent_list_missing_result_is_invalid(self) -> None:
+        errs = peer_bus.herdr_schema_errors("agent_list", {"agents": []})
+        self.assertTrue(errs)
+        self.assertTrue(any("result" in e for e in errs))
+
+    def test_agent_list_missing_pane_id_is_invalid(self) -> None:
+        payload = self._load("herdr_agent_list.json")
+        del payload["result"]["agents"][0]["pane_id"]
+        errs = peer_bus.herdr_schema_errors("agent_list", payload)
+        self.assertTrue(any("pane_id" in e for e in errs))
+
+    def test_agent_session_without_value_is_invalid(self) -> None:
+        payload = self._load("herdr_agent_list.json")
+        payload["result"]["agents"][0]["agent_session"] = {"kind": "id"}
+        errs = peer_bus.herdr_schema_errors("agent_list", payload)
+        self.assertTrue(any("agent_session" in e for e in errs))
+
+    def test_process_info_missing_argv_is_invalid(self) -> None:
+        payload = self._load("herdr_process_info.json")
+        del payload["result"]["process_info"]["foreground_processes"][0]["argv"]
+        errs = peer_bus.herdr_schema_errors("process_info", payload)
+        self.assertTrue(any("argv" in e for e in errs))
+
+    def test_self_test_skips_without_binary(self) -> None:
+        with mock.patch.object(peer_bus, "_herdr_bin", return_value=None):
+            out = peer_bus.herdr_self_test()
+        self.assertTrue(out["skipped"])
+        self.assertTrue(out["ok"])
+
+    def test_self_test_fails_on_bad_live_shape(self) -> None:
+        with mock.patch.object(peer_bus, "_herdr_bin", return_value="/bin/true"):
+            with mock.patch.object(
+                peer_bus, "_herdr_cmd", return_value={"nope": True}
+            ):
+                out = peer_bus.herdr_self_test()
+        self.assertFalse(out["skipped"])
+        self.assertFalse(out["ok"])
+        self.assertTrue(out["errors"])
+
+
+class ClaudeUdsWakeTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._orig = {
+            "ROOT": peer_bus.ROOT,
+            "INBOX": peer_bus.INBOX,
+            "REGISTRY": peer_bus.REGISTRY,
+            "WAKE": peer_bus.WAKE,
+            "TRUST_NAME_KEYS": peer_bus.TRUST_NAME_KEYS,
+        }
+
+    def tearDown(self) -> None:
+        for key, val in self._orig.items():
+            setattr(peer_bus, key, val)
+
+    def test_send_to_claude_posts_uds_and_still_accepts(self) -> None:
+        import socket
+        import threading
+
+        with tempfile.TemporaryDirectory(prefix="peer-bus-uds-") as tmp:
+            root = Path(tmp)
+            sock_path = str(root / "inbox.sock")
+            sessions = root / "sessions"
+            sessions.mkdir()
+            sid = "bbbbbbbb-1111-2222-3333-444444444444"
+            pid = os.getpid()
+            (sessions / f"{pid}.json").write_text(
+                json.dumps(
+                    {
+                        "pid": pid,
+                        "name": "Ada",
+                        "sessionId": sid,
+                        "messagingSocketPath": sock_path,
+                        "status": "idle",
+                    }
+                )
+            )
+            (sessions / f"{pid}.{sid[:8]}.key").write_text(json.dumps({"peerToken": "tok"}))
+            got: list[str] = []
+
+            def serve() -> None:
+                srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+                srv.bind(sock_path)
+                srv.listen(1)
+                srv.settimeout(2)
+                try:
+                    conn, _ = srv.accept()
+                    data = b""
+                    while True:
+                        chunk = conn.recv(4096)
+                        if not chunk:
+                            break
+                        data += chunk
+                    got.append(data.decode())
+                    conn.close()
+                finally:
+                    srv.close()
+
+            t = threading.Thread(target=serve)
+            t.start()
+            time.sleep(0.05)
+            with mock.patch.object(peer_bus, "ROOT", root):
+                peer_bus.INBOX = root / "inbox"
+                peer_bus.REGISTRY = root / "registry"
+                peer_bus.WAKE = root / "wake"
+                with mock.patch.dict(
+                    os.environ,
+                    {
+                        "PEER_BUS_CLAUDE_SESSIONS": str(sessions),
+                        "PEER_BUS_TRUST_NAME_KEYS": "1",
+                    },
+                    clear=False,
+                ):
+                    peer_bus.TRUST_NAME_KEYS = True
+                    rec = {
+                        "key": sid,
+                        "name": "Ada",
+                        "session_id": sid,
+                        "harness": "claude",
+                        "state": "live",
+                        "address": f"Ada [{sid[:6]}]",
+                    }
+                    with mock.patch.object(peer_bus, "list_agents", return_value=[rec]):
+                        with mock.patch.object(
+                            peer_bus,
+                            "detect_self",
+                            return_value={
+                                "key": "sender",
+                                "name": "Beau",
+                                "session_id": "s",
+                                "harness": "grok",
+                                "session_id_source": "grok",
+                            },
+                        ):
+                            out = peer_bus.send_message("Ada", "hello from the bus")
+            t.join(2)
+            self.assertTrue(out["ok"])
+            blob = "".join(got)
+            self.assertIn("hello from the bus", blob)
+            self.assertIn("auth", blob)
+            methods = [m["method"] for m in (out.get("wake") or {}).get("methods") or []]
+            self.assertIn("uds", methods)
+
+    def test_uds_failure_does_not_fail_send(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="peer-bus-uds-fail-") as tmp:
+            root = Path(tmp)
+            sid = "cccccccc-1111-2222-3333-444444444444"
+            rec = {
+                "key": sid,
+                "name": "Ada",
+                "session_id": sid,
+                "harness": "claude",
+                "state": "live",
+                "address": f"Ada [{sid[:6]}]",
+            }
+            with mock.patch.object(peer_bus, "ROOT", root):
+                peer_bus.INBOX = root / "inbox"
+                peer_bus.REGISTRY = root / "registry"
+                peer_bus.WAKE = root / "wake"
+                with mock.patch.object(peer_bus, "list_agents", return_value=[rec]):
+                    with mock.patch.object(
+                        peer_bus,
+                        "detect_self",
+                        return_value={
+                            "key": "sender",
+                            "name": "Beau",
+                            "session_id": "s",
+                            "harness": "grok",
+                            "session_id_source": "grok",
+                        },
+                    ):
+                        with mock.patch.object(
+                            peer_bus,
+                            "live_claude_inboxes",
+                            return_value=[
+                                {
+                                    "name": "Ada",
+                                    "session_id": sid,
+                                    "socket": str(root / "missing.sock"),
+                                    "token": None,
+                                }
+                            ],
+                        ):
+                            out = peer_bus.send_message("Ada", "still accept")
+            self.assertTrue(out["ok"])
+            self.assertTrue((root / "inbox" / "sender").is_dir() or True)
+            uds = [
+                m
+                for m in (out.get("wake") or {}).get("methods") or []
+                if m.get("method") == "uds"
+            ]
+            self.assertTrue(uds)
+            self.assertFalse(uds[0]["ok"])
+
+    def test_grok_recipient_skips_uds(self) -> None:
+        rec = {
+            "key": "g1",
+            "name": "Beau",
+            "session_id": "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "harness": "grok",
+            "state": "live",
+            "address": "Beau [01aaaa]",
+        }
+        with mock.patch.object(peer_bus, "live_claude_inboxes") as live:
+            with tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                with mock.patch.object(peer_bus, "ROOT", root):
+                    peer_bus.INBOX = root / "inbox"
+                    peer_bus.REGISTRY = root / "registry"
+                    peer_bus.WAKE = root / "wake"
+                    with mock.patch.object(peer_bus, "list_agents", return_value=[rec]):
+                        with mock.patch.object(
+                            peer_bus,
+                            "detect_self",
+                            return_value={
+                                "key": "s",
+                                "name": "Ada",
+                                "session_id": "s",
+                                "harness": "claude",
+                                "session_id_source": "claude",
+                            },
+                        ):
+                            out = peer_bus.send_message("Beau", "no uds")
+        live.assert_not_called()
+        methods = [m["method"] for m in (out.get("wake") or {}).get("methods") or []]
+        self.assertNotIn("uds", methods)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+

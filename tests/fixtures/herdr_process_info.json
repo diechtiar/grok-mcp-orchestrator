@@ -1,0 +1,19 @@
+{
+  "result": {
+    "type": "process_info",
+    "process_info": {
+      "foreground_process_group_id": 100,
+      "foreground_processes": [
+        {
+          "argv": ["claude", "--resume", "aaaaaaaa-1111-2222-3333-444444444444", "-n", "Ada"],
+          "cmdline": "claude --resume aaaaaaaa-1111-2222-3333-444444444444 -n Ada",
+          "cwd": "/tmp/project",
+          "name": "claude",
+          "pid": 100
+        }
+      ],
+      "pane_id": "w1:p1",
+      "shell_pid": 100
+    }
+  }
+}

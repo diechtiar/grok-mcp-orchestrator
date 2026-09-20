@@ -48,7 +48,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-PEER_BUS_VERSION = "0.9.7"
+PEER_BUS_VERSION = "0.9.8"
 
 
 def _default_root() -> Path:
@@ -134,10 +134,109 @@ def set_wake_callback(callback: Any) -> None:
     _WAKE_CALLBACK = callback
 
 
+def _claude_sessions_dir() -> Path:
+    env = os.environ.get("PEER_BUS_CLAUDE_SESSIONS")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / ".claude" / "sessions"
+
+
+def live_claude_inboxes() -> list[dict[str, Any]]:
+    """Live Claude Code sessions that expose a reachable inbox socket."""
+    root = _claude_sessions_dir()
+    if not root.is_dir():
+        return []
+    found: dict[str, dict[str, Any]] = {}
+    for path in root.glob("*.json"):
+        data = _read_json(path)
+        if not data:
+            continue
+        try:
+            pid = int(data.get("pid") or 0)
+        except (TypeError, ValueError):
+            continue
+        if pid <= 0 or not _pid_alive(pid):
+            continue
+        sock = str(data.get("messagingSocketPath") or "")
+        if not sock or not Path(sock).exists():
+            continue
+        name = str(data.get("name") or "").strip()
+        sid = str(data.get("sessionId") or data.get("session_id") or "")
+        token = None
+        for key_path in root.glob(f"{pid}.*.key"):
+            kd = _read_json(key_path) or {}
+            tok = kd.get("peerToken")
+            if tok:
+                token = str(tok)
+                break
+        rec = {
+            "name": name,
+            "session_id": sid,
+            "pid": pid,
+            "socket": sock,
+            "token": token,
+            "updated": float(data.get("statusUpdatedAt") or data.get("updatedAt") or 0),
+        }
+        key = sid or name or str(pid)
+        prev = found.get(key)
+        if prev is None or rec["updated"] >= prev["updated"]:
+            found[key] = rec
+    return list(found.values())
+
+
+def send_claude_uds(
+    sock_path: str,
+    body: str,
+    *,
+    token: str | None = None,
+    from_name: str = "peer-bus",
+    timeout: float = 2.0,
+) -> dict[str, Any]:
+    """Post one NDJSON user message to a Claude inbox socket. Never the send path's success."""
+    import socket as _socket
+
+    msg_id = uuid.uuid4().hex
+    payload = {
+        "type": "user",
+        "message": {"role": "user", "content": body},
+        "from": from_name,
+        "msgV": 1,
+        "msg_id": msg_id,
+        "ts": _now(),
+    }
+    lines = []
+    if token:
+        lines.append(json.dumps({"type": "auth", "token": token}))
+    lines.append(json.dumps(payload, ensure_ascii=False))
+    blob = ("\n".join(lines) + "\n").encode("utf-8")
+    sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    sock.settimeout(timeout)
+    try:
+        sock.connect(sock_path)
+        sock.sendall(blob)
+    finally:
+        try:
+            sock.close()
+        except OSError:
+            pass
+    return {"ok": True, "msg_id": msg_id, "socket": sock_path}
+
+
 def _try_wake(envelope: dict[str, Any], recipient: dict[str, Any]) -> dict[str, Any]:
     """Best-effort peer wake after inbox accept. Never raises; never undoes acceptance."""
     out: dict[str, Any] = {"attempted": False, "ok": None, "methods": [], "error": None}
-    if _WAKE_CALLBACK is None and not (WAKE_ENABLED and WAKE_CMD) and not WAKE_DROP:
+    uds_wanted = os.environ.get("PEER_BUS_CLAUDE_UDS", "1").lower() not in {
+        "0",
+        "false",
+        "no",
+        "off",
+    } and str(recipient.get("harness") or "").lower() == "claude"
+    if (
+        _WAKE_CALLBACK is None
+        and not (WAKE_ENABLED and WAKE_CMD)
+        and not WAKE_DROP
+        and not uds_wanted
+    ):
         return out
     methods_ok = 0
     methods_tried = 0
@@ -158,6 +257,33 @@ def _try_wake(envelope: dict[str, Any], recipient: dict[str, Any]) -> dict[str, 
             _mark("callback", True)
         except Exception as exc:  # noqa: BLE001 — wake must not fail send
             _mark("callback", False, f"{type(exc).__name__}: {exc}")
+
+    # 1b) Claude native inbox socket (same channel as SendMessage). Opt-out:
+    # PEER_BUS_CLAUDE_UDS=0. Failures never undo accept.
+    if uds_wanted:
+        try:
+            want_sid = str(recipient.get("session_id") or "")
+            want_name = str(recipient.get("name") or "")
+            hit = None
+            for row in live_claude_inboxes():
+                if want_sid and row.get("session_id") == want_sid:
+                    hit = row
+                    break
+                if want_name and row.get("name") == want_name:
+                    hit = row
+            if hit and hit.get("socket"):
+                body = envelope.get("body") if isinstance(envelope.get("body"), str) else ""
+                send_claude_uds(
+                    str(hit["socket"]),
+                    body,
+                    token=hit.get("token"),
+                    from_name=str((envelope.get("from") or {}).get("address") or "peer-bus"),
+                )
+                _mark("uds", True)
+            else:
+                _mark("uds", False, "no live inbox socket")
+        except Exception as exc:  # noqa: BLE001
+            _mark("uds", False, f"{type(exc).__name__}: {exc}")
 
     # 2) Operator-supplied shell command (PEER_BUS_WAKE=1 + PEER_BUS_WAKE_CMD)
     if WAKE_ENABLED and WAKE_CMD:
@@ -549,6 +675,92 @@ def _herdr_bin() -> str | None:
         if cand.is_file() and os.access(cand, os.X_OK):
             return str(cand)
     return None
+
+
+def herdr_schema_errors(kind: str, payload: Any) -> list[str]:
+    """Return problems if payload does not match the pinned multiplexer JSON.
+
+    Kinds: agent_list, pane_list, process_info. Empty list means the shape is ok.
+    """
+    if not isinstance(payload, dict):
+        return ["payload is not an object"]
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return ["missing result object"]
+    errs: list[str] = []
+    if kind == "agent_list":
+        agents = result.get("agents")
+        if not isinstance(agents, list):
+            return ["result.agents is not a list"]
+        for i, item in enumerate(agents):
+            if not isinstance(item, dict):
+                errs.append(f"agents[{i}] not an object")
+                continue
+            if not item.get("pane_id"):
+                errs.append(f"agents[{i}] missing pane_id")
+            if "agent" not in item:
+                errs.append(f"agents[{i}] missing agent")
+            sess = item.get("agent_session")
+            if sess is not None and (
+                not isinstance(sess, dict) or not sess.get("value")
+            ):
+                errs.append(f"agents[{i}].agent_session missing value")
+        return errs
+    if kind == "pane_list":
+        panes = result.get("panes")
+        if not isinstance(panes, list):
+            return ["result.panes is not a list"]
+        for i, item in enumerate(panes):
+            if not isinstance(item, dict):
+                errs.append(f"panes[{i}] not an object")
+                continue
+            if not item.get("pane_id"):
+                errs.append(f"panes[{i}] missing pane_id")
+            if "label" not in item and "terminal_title_stripped" not in item:
+                errs.append(f"panes[{i}] missing label")
+        return errs
+    if kind == "process_info":
+        info = result.get("process_info")
+        if not isinstance(info, dict):
+            return ["result.process_info is not an object"]
+        procs = info.get("foreground_processes")
+        if not isinstance(procs, list):
+            return ["process_info.foreground_processes is not a list"]
+        for i, proc in enumerate(procs):
+            if not isinstance(proc, dict):
+                errs.append(f"foreground_processes[{i}] not an object")
+                continue
+            if "argv" not in proc:
+                errs.append(f"foreground_processes[{i}] missing argv")
+            elif not isinstance(proc.get("argv"), list):
+                errs.append(f"foreground_processes[{i}].argv is not a list")
+        return errs
+    return [f"unknown schema kind {kind!r}"]
+
+
+def herdr_self_test() -> dict[str, Any]:
+    """Validate live multiplexer JSON against the pinned schema.
+
+    skipped+ok when no binary. ok false when the shape drifted.
+    """
+    if not _herdr_bin():
+        return {"ok": True, "skipped": True, "errors": [], "n_agents": 0}
+    errors: list[str] = []
+    agents_payload = _herdr_cmd("agent", "list")
+    errors.extend(
+        f"agent_list: {e}" for e in herdr_schema_errors("agent_list", agents_payload)
+    )
+    panes_payload = _herdr_cmd("pane", "list")
+    errors.extend(
+        f"pane_list: {e}" for e in herdr_schema_errors("pane_list", panes_payload)
+    )
+    n = 0
+    if isinstance(agents_payload, dict):
+        result = agents_payload.get("result") if isinstance(agents_payload.get("result"), dict) else {}
+        agents = result.get("agents") if isinstance(result, dict) else None
+        if isinstance(agents, list):
+            n = len(agents)
+    return {"ok": not errors, "skipped": False, "errors": errors, "n_agents": n}
 
 
 def _herdr_cmd(*args: str) -> dict[str, Any] | None:
@@ -1891,6 +2103,14 @@ def _cmd_mail(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_self_test(args: argparse.Namespace) -> int:
+    out = herdr_self_test()
+    print(json.dumps(out, indent=2))
+    if out.get("skipped"):
+        return 0
+    return 0 if out.get("ok") else 1
+
+
 def _cmd_prune(args: argparse.Namespace) -> int:
     result = prune_stale(apply=bool(args.apply))
     print(json.dumps(result, indent=2))
@@ -2019,6 +2239,12 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("heartbeat")
     _add_as(p)
     p.set_defaults(func=_cmd_heartbeat)
+
+    p = sub.add_parser(
+        "self-test",
+        help="check live multiplexer JSON against the pinned schema (skip if no binary)",
+    )
+    p.set_defaults(func=_cmd_self_test)
 
     p = sub.add_parser(
         "prune",

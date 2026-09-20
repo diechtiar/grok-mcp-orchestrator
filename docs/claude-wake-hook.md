@@ -1,8 +1,17 @@
-# Claude-side wake consumer (peer-bus #3 remainder)
+# Claude-side wake
 
-Filesystem accept is already done (`inbox/` + optional `wake/<key>.json`).
-Claude Code cannot be woken by Grok in-process. This hook makes a Claude session
-**notice** a wake drop and pull mail.
+Two layers, both best-effort, neither proof of read:
+
+1. **Inbox socket (default on).** After `send` accepts a message to a Claude
+   recipient, the library posts NDJSON to that session’s Unix inbox (the same
+   channel as native SendMessage). Opt out: `PEER_BUS_CLAUDE_UDS=0`. A missing
+   socket or a held inbound does not fail accept. See [SECURITY.md](../SECURITY.md).
+2. **Wake-drop hook (this file).** Filesystem accept already wrote `inbox/` and
+   optional `wake/<key>.json`. This hook makes a Claude session **notice** the
+   drop and pull mail (`receive_messages` / `recv`).
+
+The socket post can start a turn without waiting for Enter. The hook covers
+sessions that still poll, and Stop/UserPromptSubmit when the socket was held.
 
 Measured against **Claude Code 2.1.238**.
 
@@ -102,5 +111,7 @@ Restart Claude Code after editing hooks (they load at session start).
 |-----|------|
 | `PEER_BUS_ROOT` | Bus root (same as sender) |
 | `PEER_BUS_CLAUDE_WAKE` | Set `1` to enable the hook script (script no-ops otherwise) |
+| `PEER_BUS_CLAUDE_UDS` | Default on. Set `0` to skip the native inbox-socket post after accept |
+| `PEER_BUS_CLAUDE_SESSIONS` | Override Claude session-registry dir (tests); default `~/.claude/sessions` |
 | `CLAUDE_CODE_SESSION_ID` | CLI-injected session id (hooks + stdio MCP on 2.1.238) |
 | `CLAUDE_SESSION_ID` | Fallback only; not the 2.1.238 hook env |

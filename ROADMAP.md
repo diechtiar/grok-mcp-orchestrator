@@ -2,7 +2,7 @@
 
 Tracked on the [GitHub Project](https://github.com/users/diechtiar/projects/4).
 
-## Current (v0.9.7)
+## Current (v0.9.8)
 
 Stdlib CLI + stdio MCP. Live roster (Herdr, optional tmux, Grok pids, usage overlay).
 Send/recv/ack with session-bound keys. `watch` (inotify; `--max-runtime`). `mail`. `prune`.
@@ -10,10 +10,8 @@ Acceptance is not delivery. Same-UID cooperative bus — see [SECURITY.md](SECUR
 
 ## Next
 
-1. **Publish this tree** as the GitHub default branch (code was ahead of the last public tag).
-2. Herdr JSON schema smoke against a fixture **and** a live `--self-test` when `herdr` is on PATH.
-3. Optional Claude dual-write (bus file and native inbox) as a documented wake, never as proof of read.
-4. Native Grok dashboard inject — **blocked** on product APIs. Listen model stays pull (`recv` / `watch`).
+1. Native Grok dashboard inject — **blocked** on product APIs. Listen model stays pull (`recv` / `watch`).
+2. Publish tags for 0.9.7 / 0.9.8 when cutting a release.
 
 ## Non-goals
 
@@ -38,3 +36,4 @@ Acceptance is not delivery. Same-UID cooperative bus — see [SECURITY.md](SECUR
 - [x] Evented watch + unread on statuslines — **v0.8.0**
 - [x] Hyphenated refs, prune, ancestor session id, PATH herdr — **v0.9.1–0.9.6**
 - [x] Ambiguous-ref refuse, single roster fetch, watch max-runtime, generic docs — **v0.9.7**
+- [x] Multiplexer JSON schema pin + `self-test`; Claude inbox-socket dual-write — **v0.9.8**

@@ -1,0 +1,49 @@
+{
+  "result": {
+    "type": "agent_list",
+    "agents": [
+      {
+        "agent": "claude",
+        "agent_session": {
+          "agent": "claude",
+          "kind": "id",
+          "source": "herdr:claude",
+          "value": "aaaaaaaa-1111-2222-3333-444444444444"
+        },
+        "agent_status": "idle",
+        "cwd": "/tmp/project",
+        "focused": false,
+        "foreground_cwd": "/tmp/project",
+        "pane_id": "w1:p1",
+        "revision": 1,
+        "state_change_seq": 1,
+        "tab_id": "w1:t1",
+        "terminal_id": "term_1",
+        "terminal_title": "Ada",
+        "terminal_title_stripped": "Ada",
+        "workspace_id": "w1"
+      },
+      {
+        "agent": "grok",
+        "agent_session": {
+          "agent": "grok",
+          "kind": "id",
+          "source": "herdr:grok",
+          "value": "01aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "agent_status": "idle",
+        "cwd": "/tmp/project",
+        "focused": false,
+        "foreground_cwd": "/tmp/project",
+        "pane_id": "w1:p2",
+        "revision": 1,
+        "state_change_seq": 2,
+        "tab_id": "w1:t1",
+        "terminal_id": "term_2",
+        "terminal_title": "Beau",
+        "terminal_title_stripped": "Beau",
+        "workspace_id": "w1"
+      }
+    ]
+  }
+}

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.8 — 2026-09-20
+
+- Pinned JSON schema for multiplexer `agent list`, `pane list`, and `process-info`.
+  `peer-bus self-test` checks a live binary when present (skip if missing).
+- After accept, Claude recipients also get a native inbox-socket post (same channel
+  as SendMessage). Opt out with `PEER_BUS_CLAUDE_UDS=0`. Failure never undoes accept.
+
 ## 0.9.7 — 2026-09-19
 
 - Docs and tests are host-agnostic: no machine, user, or seat names in the tree.

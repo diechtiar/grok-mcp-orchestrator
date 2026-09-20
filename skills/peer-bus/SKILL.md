@@ -34,13 +34,14 @@ python3 /path/to/peer_bus.py watch           # inotify on Linux; PEER_BUS_WATCH=
 python3 /path/to/peer_bus.py watch --max-runtime 36000
 python3 /path/to/peer_bus.py prune           # dead registry/usage/empty-inbox (dry-run)
 python3 /path/to/peer_bus.py prune --apply
+python3 /path/to/peer_bus.py self-test
 ```
 
 Live names come from **Herdr** first (session `agents` by default), then tmux if `PEER_BUS_TMUX=1`. A work tracker is not presence. Always address `Name [ref]` from `flock`. `--as` / display_name only change from.name. Acceptance is not receipt: `ack` moves the inbox file.
 
 MCP `send_message`: pass only `to` and `body`. Extra fields have made some hosts drop `to`. Long-running `watch` should set `--max-runtime` if the host kills unbounded monitors.
 
-After `send`, a wake drop is written under `$PEER_BUS_ROOT/wake/<key>.json` (default). Optional `PEER_BUS_WAKE=1` + `PEER_BUS_WAKE_CMD` runs an operator hook; wake failure never fails acceptance.
+After `send`, a wake drop is written under `$PEER_BUS_ROOT/wake/<key>.json` (default). Claude recipients also get a native inbox-socket post (`PEER_BUS_CLAUDE_UDS=0` to disable). Optional `PEER_BUS_WAKE=1` + `PEER_BUS_WAKE_CMD` runs an operator hook; wake failure never fails acceptance.
 
 ## Semantics (binding)
 

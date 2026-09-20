@@ -4,12 +4,13 @@ Worked end-to-end multi-session flow (Grok↔Grok or Grok↔Claude on the same O
 
 ## 0. Preconditions
 
-**Operator model:** each participating session must be told to listen (poll `recv` / run `watch` / enable the Claude wake hook). There is no automatic Grok push-wake; acceptance still only means the inbox file exists.
+**Operator model:** each participating session must be told to listen (poll `recv` / run `watch` / enable the Claude wake hook). There is no automatic Grok push-wake; acceptance still only means the inbox file exists. A Claude recipient may also get a native inbox-socket post (see wake below); that is still not proof of read.
 
 
 - Both sessions load peer-bus MCP **or** can run `python3 peer_bus.py …`
 - Same bus root (default `~/.local/share/peer-bus`, or identical `PEER_BUS_ROOT`)
 - Optional: `PEER_BUS_USAGE_DIR` so Grok `list` sees Claude statusline snapshots
+- Optional: `python3 peer_bus.py self-test` when a multiplexer binary is on PATH (pins JSON shape)
 
 ## 1. Discover
 
@@ -36,8 +37,9 @@ RPT|ack,artefact,wrong_priors'
 Wake (best-effort, never fails accept):
 
 - Default: drop `$PEER_BUS_ROOT/wake/<recipient-key>.json`
+- Claude recipients: native inbox-socket post (same channel as SendMessage). Opt out with `PEER_BUS_CLAUDE_UDS=0`.
 - Optional: `PEER_BUS_WAKE=1` + `PEER_BUS_WAKE_CMD='…'`
-- Optional: in-process `peer_bus.set_wake_callback(...)` (e.g. Claude native SendMessage host)
+- Optional: in-process `peer_bus.set_wake_callback(...)`
 
 ## 3. Recipient pulls
 

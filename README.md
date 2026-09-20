@@ -2,7 +2,7 @@
 
 Cross-harness **ListAgents / SendMessage** for multi-session agent orchestration.
 
-**Version:** 0.9.7 · **License:** MIT · **Python:** 3.11+ (stdlib only)
+**Version:** 0.9.8 · **License:** MIT · **Python:** 3.11+ (stdlib only)
 
 Claude Code already has native `SendMessage` / `ListAgents`. This project gives **Grok** (and Claude) the same verbs over a small **filesystem bus**, plus a zero-dependency **stdio MCP server**.
 
@@ -19,6 +19,8 @@ Project board: https://github.com/users/diechtiar/projects/4
 - `watch` — inotify on Linux (poll fallback); one line per new unread (`msg_id` + `from.address`)
 - `mail` — unread count, no bodies (statuslines use this)
 - Wake after accept — drop file + optional cmd/callback (never fails send)
+- Claude recipients: native inbox-socket post after accept (`PEER_BUS_CLAUDE_UDS=0` to disable)
+- `self-test` — pin multiplexer JSON (`agent list` / `pane list` / `process-info`)
 - Playbook: [`docs/playbook.md`](docs/playbook.md)
 - Session-bound inbox keys (not spoofable via display name)
 - Env-agnostic defaults (no host-specific paths baked into the library)
@@ -59,7 +61,9 @@ python3 peer_bus.py ack <msg_id>
 # monitor-friendly watch (one line per new unread; backoff when idle)
 python3 peer_bus.py watch
 # → <msg_id>\t<from.address>
+python3 peer_bus.py watch --max-runtime 36000
 
+python3 peer_bus.py self-test   # multiplexer JSON shape; skip if no binary
 python3 peer_bus.py version
 ```
 
@@ -134,10 +138,10 @@ Same OS user on one machine ⇒ shared bus automatically. Set `PEER_BUS_ROOT` id
 | 2 | Optional: set `PEER_BUS_USAGE_DIR` so Grok can list Claude snapshots |
 | 3 | `list_agents` → copy `Name [ref]` |
 | 4 | `send_message` / `peer-bus send` |
-| 5 | Recipient **listens** as instructed by the user — `receive_messages` / `recv` / `watch` (no Grok push-wake) |
+| 5 | Recipient **listens** — `receive_messages` / `recv` / `watch` (no Grok push-wake). Claude recipients also get a native inbox-socket post after accept (`PEER_BUS_CLAUDE_UDS=0` to disable). That is a hint, not proof of read. |
 | 6 | Reply using the latest inbound `from.address` |
 
-Claude’s native `SendMessage` remains a separate channel (Claude↔Claude). Wake-on-send for Claude is tracked as [#3](https://github.com/diechtiar/grok-mcp-orchestrator/issues/3).
+Claude↔Claude native `SendMessage` remains a separate channel. Grok→Claude on this bus now dual-writes the file and, when the recipient is Claude, the inbox socket.
 
 ---
 
@@ -227,6 +231,7 @@ Neither is required for send/recv.
 | `PEER_BUS_WAKE_CMD` | empty | Shell hook; failures ignored |
 | `PEER_BUS_WAKE_DROP` | on | Write `wake/<key>.json` after accept |
 | `PEER_BUS_WATCH_MAX_RUNTIME` | off | `watch` exits 0 after N seconds (`--max-runtime` overrides) |
+| `PEER_BUS_CLAUDE_UDS` | on | After accept, post to a live Claude inbox socket; never fails send |
 
 ---
 

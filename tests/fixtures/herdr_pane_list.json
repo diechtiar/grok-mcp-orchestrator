@@ -1,0 +1,25 @@
+{
+  "result": {
+    "type": "pane_list",
+    "panes": [
+      {
+        "agent": "claude",
+        "agent_session": {
+          "value": "aaaaaaaa-1111-2222-3333-444444444444"
+        },
+        "agent_status": "idle",
+        "cwd": "/tmp/project",
+        "focused": false,
+        "foreground_cwd": "/tmp/project",
+        "label": "Ada",
+        "pane_id": "w1:p1",
+        "revision": 1,
+        "tab_id": "w1:t1",
+        "terminal_id": "term_1",
+        "terminal_title": "Ada",
+        "terminal_title_stripped": "Ada",
+        "workspace_id": "w1"
+      }
+    ]
+  }
+}
