@@ -13,6 +13,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/absolute/path/to/hooks/peer-bus-wake.sh",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

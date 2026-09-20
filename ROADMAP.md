@@ -2,22 +2,39 @@
 
 Tracked on the [GitHub Project](https://github.com/users/diechtiar/projects/4).
 
+## Current (v0.9.7)
+
+Stdlib CLI + stdio MCP. Live roster (Herdr, optional tmux, Grok pids, usage overlay).
+Send/recv/ack with session-bound keys. `watch` (inotify; `--max-runtime`). `mail`. `prune`.
+Acceptance is not delivery. Same-UID cooperative bus — see [SECURITY.md](SECURITY.md).
+
+## Next
+
+1. **Publish this tree** as the GitHub default branch (code was ahead of the last public tag).
+2. Herdr JSON schema smoke against a fixture **and** a live `--self-test` when `herdr` is on PATH.
+3. Optional Claude dual-write (bus file and native inbox) as a documented wake, never as proof of read.
+4. Native Grok dashboard inject — **blocked** on product APIs. Listen model stays pull (`recv` / `watch`).
+
+## Non-goals
+
+- Multi-tenant / cross-UID security
+- Treating `ok: true` as the peer having read the mail
+- Relaying user authority or secrets on the bus
+- Replacing Claude↔Claude native SendMessage
+
 ## Done
 
-- [x] CLI + zero-dep stdio MCP (`list_agents`, `send_message`, `receive_messages`, `ack_message`, `whoami`, `heartbeat`) — **v0.4.0**
+- [x] CLI + zero-dep stdio MCP — **v0.4.0**
 - [x] Env-agnostic bus root (`XDG` / `~/.local/share/peer-bus`)
 - [x] Path containment, symlink refusal, session-bound keys
 - [x] Medium-risk hardenings (session override gate, live-only send, MCP trust refusal, untrusted recv wrappers)
 - [x] Documented Grok + Claude MCP setup ([README](README.md))
 - [x] [#1](https://github.com/diechtiar/grok-mcp-orchestrator/issues/1) Claude Code MCP settings recipe
-- [x] [#2](https://github.com/diechtiar/grok-mcp-orchestrator/issues/2) Agent skill stub — [`skills/peer-bus/SKILL.md`](skills/peer-bus/SKILL.md) (**v0.5.0**)
-- [x] [#4](https://github.com/diechtiar/grok-mcp-orchestrator/issues/4) Inbox monitor — `peer-bus watch` with idle backoff (**v0.5.0**)
-- [x] [#3](https://github.com/diechtiar/grok-mcp-orchestrator/issues/3) Wake bridge — drop file + optional `PEER_BUS_WAKE_CMD` / in-process callback (**v0.6.0**)
-- [x] [#5](https://github.com/diechtiar/grok-mcp-orchestrator/issues/5) Playbook — [`docs/playbook.md`](docs/playbook.md) (**v0.6.0**)
-
-## Open
-
-1. **P3 — Native Grok dashboard inject** — optional product enhancement if APIs land. **Accepted operator model (2026-08-21):** the user instructs each session to listen (`recv` at turn start, `peer-bus watch` / monitor, or Claude wake hook). Peer-bus does not push-wake Grok sessions.
-2. ~~**Hardening** — automated smoke/CI~~ — `scripts/smoke.sh` + unittest + `.github/workflows/smoke.yml` (**v0.6.5**).
-
-Issues remain open until the operator closes them; roadmap checkboxes track shipped code/docs only.
+- [x] [#2](https://github.com/diechtiar/grok-mcp-orchestrator/issues/2) Agent skill stub
+- [x] [#4](https://github.com/diechtiar/grok-mcp-orchestrator/issues/4) Inbox monitor — `peer-bus watch`
+- [x] [#3](https://github.com/diechtiar/grok-mcp-orchestrator/issues/3) Wake bridge
+- [x] [#5](https://github.com/diechtiar/grok-mcp-orchestrator/issues/5) Playbook
+- [x] Live roster (tmux, then Herdr-first) — **v0.7–0.9**
+- [x] Evented watch + unread on statuslines — **v0.8.0**
+- [x] Hyphenated refs, prune, ancestor session id, PATH herdr — **v0.9.1–0.9.6**
+- [x] Ambiguous-ref refuse, single roster fetch, watch max-runtime, generic docs — **v0.9.7**

@@ -8,15 +8,20 @@ Measured against **Claude Code 2.1.238**.
 
 ## Behaviour
 
-On `UserPromptSubmit` (optional `SessionStart`):
+On `UserPromptSubmit`, `Stop`, and optional `SessionStart`:
 
 1. Resolve self key the same way peer-bus `_slug` does, from stdin `session_id`,
    then `$CLAUDE_CODE_SESSION_ID`, then `$CLAUDE_SESSION_ID`.
-2. If `$PEER_BUS_ROOT/wake/<key>.json` exists and `msg_id` differs from
-   `$PEER_BUS_ROOT/wake/<key>.last`, print JSON `additionalContext` telling the
-   session to run MCP `receive_messages` / `peer-bus recv`.
-3. Never treat wake metadata as user approval; bodies stay untrusted.
-4. Always exit 0.
+2. If `$PEER_BUS_ROOT/wake/<key>.json` exists (or the inbox has unread json)
+   and `msg_id` differs from `$PEER_BUS_ROOT/wake/<key>.last`, print JSON
+   `additionalContext` telling the session to run MCP `receive_messages` /
+   `peer-bus recv`. Hint once per msg_id — ignored hints do not loop.
+3. **Stop** is the cheap drain for sessions that talk on the bus without a user
+   prompt. Claude Code 2.1.163+ treats Stop `additionalContext` as
+   turn continuation, not a hook error. UserPromptSubmit still covers the
+   operator's next Enter.
+4. Never treat wake metadata as user approval; bodies stay untrusted.
+5. Always exit 0.
 
 CLI 2.1.238 injects **`$CLAUDE_CODE_SESSION_ID`** into hook and stdio MCP
 subprocesses (same value as stdin `session_id`). `$CLAUDE_SESSION_ID` is not

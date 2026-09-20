@@ -2,7 +2,7 @@
 
 Cross-harness **ListAgents / SendMessage** for multi-session agent orchestration.
 
-**Version:** 0.6.6 · **License:** MIT · **Python:** 3.11+ (stdlib only)
+**Version:** 0.9.7 · **License:** MIT · **Python:** 3.11+ (stdlib only)
 
 Claude Code already has native `SendMessage` / `ListAgents`. This project gives **Grok** (and Claude) the same verbs over a small **filesystem bus**, plus a zero-dependency **stdio MCP server**.
 
@@ -14,9 +14,10 @@ Project board: https://github.com/users/diechtiar/projects/4
 
 ## Features
 
-- Discover live peers (Grok active sessions, optional Claude statusline snapshots, heartbeats)
-- Send / receive / ack messages (**acceptance ≠ delivery**)
-- `watch` — idle-backoff inbox poller for `/loop` / monitors (`msg_id` + `from.address` only)
+- Discover live peers (`list` / `flock`: tmux pane title + pid, Herdr `agents`, Grok actives with a live pid, usage overlay; registry is not presence). 5h quota is one `pool` header, not a per-row figure; per-seat discriminator is `context`.
+- Send / receive / ack messages (**acceptance ≠ delivery**). Recv is newest-first; ack consumes.
+- `watch` — inotify on Linux (poll fallback); one line per new unread (`msg_id` + `from.address`)
+- `mail` — unread count, no bodies (statuslines use this)
 - Wake after accept — drop file + optional cmd/callback (never fails send)
 - Playbook: [`docs/playbook.md`](docs/playbook.md)
 - Session-bound inbox keys (not spoofable via display name)
@@ -41,14 +42,14 @@ Requires **Python 3.11+**. No PyPI packages.
 
 ## Quick start (CLI)
 
-Inbox keys are **session-bound**. `--as` / `PEER_BUS_SELF` only set the display name. Put `--as` **after** the subcommand (`send --as Rick`, not `peer-bus --as Rick send`).
+Inbox keys are **session-bound**. `--as` / `PEER_BUS_SELF` only set the display name. Put `--as` **after** the subcommand (`send --as Ada`, not `peer-bus --as Ada send`).
 
 ```bash
-python3 peer_bus.py whoami --as Rick
+python3 peer_bus.py whoami --as Ada
 python3 peer_bus.py list
 
 # prefer Name [ref] when names collide
-python3 peer_bus.py send --as Rick --to "Luke [01a023]" \
+python3 peer_bus.py send --as Ada --to "Beau [01a023]" \
   --body $'@v1 ping\nDO|one-line ack\nRPT|ok'
 
 # on the recipient session (their harness session id):
@@ -92,7 +93,7 @@ enabled = true
 - `PEER_BUS_USAGE_DIR` is optional; set it so `list_agents` can see Claude statusline snapshots.
 - Reload: `grok mcp doctor peer-bus` or restart the session.
 
-**Tools:** `list_agents`, `send_message`, `receive_messages`, `ack_message`, `whoami`, `heartbeat`.
+**Tools:** `list_agents`, `flock`, `send_message`, `receive_messages`, `ack_message`, `whoami`, `heartbeat`, `mail_count`.
 
 ### Claude Code
 
@@ -171,7 +172,7 @@ printf '%s\n' \
 python3 peer_bus.py list
 ```
 
-Expect six tools and any live peers (or an empty table). If MCP fails to start, check that `PEER_BUS_TRUST_NAME_KEYS` is unset.
+Expect eight tools and any live peers (or an empty table). If MCP fails to start, check that `PEER_BUS_TRUST_NAME_KEYS` is unset.
 
 ---
 
@@ -225,6 +226,7 @@ Neither is required for send/recv.
 | `PEER_BUS_WAKE` | off | Enable `PEER_BUS_WAKE_CMD` after accept |
 | `PEER_BUS_WAKE_CMD` | empty | Shell hook; failures ignored |
 | `PEER_BUS_WAKE_DROP` | on | Write `wake/<key>.json` after accept |
+| `PEER_BUS_WATCH_MAX_RUNTIME` | off | `watch` exits 0 after N seconds (`--max-runtime` overrides) |
 
 ---
 

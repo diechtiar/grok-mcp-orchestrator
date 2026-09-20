@@ -1,9 +1,8 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+plan-*.md
 inbox/
 registry/
-__pycache__/
-*.pyc
-.DS_Store
-.env
-*.egg-info/
-.venv/
-plan-*.md
+wake/
+*.last

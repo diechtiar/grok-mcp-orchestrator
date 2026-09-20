@@ -18,12 +18,12 @@ python3 peer_bus.py list
 # or MCP list_agents
 ```
 
-Copy an address with ref when names collide: `Luke [01a023]`.
+Copy an address with ref when names collide: `Beau [01a023]`.
 
 ## 2. Send a contract (not an essay)
 
 ```bash
-python3 peer_bus.py send --as Rick --to "Luke [01a023]" --body $'@v1 topic
+python3 peer_bus.py send --as Ada --to "Beau [01a023]" --body $'@v1 topic
 CTX|one-line frame
 DO|outcome contract
 NOT|stop point
@@ -31,7 +31,7 @@ PRIOR|claim|d=how|t=HH:MM
 RPT|ack,artefact,wrong_priors'
 ```
 
-`ok: true` means **accepted** (inbox file written). It does **not** mean Luke has read it.
+`ok: true` means **accepted** (inbox file written). It does **not** mean Beau has read it.
 
 Wake (best-effort, never fails accept):
 
@@ -41,7 +41,7 @@ Wake (best-effort, never fails accept):
 
 ## 3. Recipient pulls
 
-On Luke’s session (turn start, `/loop`, or `peer-bus watch`):
+On Beau’s session (turn start, `/loop`, or `peer-bus watch`):
 
 ```bash
 python3 peer_bus.py recv
@@ -61,7 +61,7 @@ python3 peer_bus.py watch
 Send to the latest inbound `from.address` (not a guessed display name).
 
 ```bash
-python3 peer_bus.py send --as Luke --to "Rick [019fc7]" --body $'@v1 topic
+python3 peer_bus.py send --as Beau --to "Ada [019fc7]" --body $'@v1 topic
 ACK|ok
 FACT|…|e=…
 RPT|ack,artefact,wrong_priors'

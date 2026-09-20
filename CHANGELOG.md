@@ -1,5 +1,100 @@
 # Changelog
 
+## 0.9.7 — 2026-09-19
+
+- Docs and tests are host-agnostic: no machine, user, or seat names in the tree.
+- Ambiguous flock `[ref]` prefixes raise instead of picking the first match.
+- `resolve_recipient` loads the roster once (stale rows used only for the error).
+- `receive_messages` no longer writes a registry heartbeat.
+- `watch --max-runtime SEC` / `PEER_BUS_WATCH_MAX_RUNTIME` exits 0 when the budget elapses.
+
+## 0.9.6 — 2026-09-10
+
+- `resolve_recipient` accepts hyphenated flock refs. Two session ids sharing the
+  first 8 hex chars print `Name [01a08225-0]`; a hex-only character class treated
+  that as an unknown name. Copy-paste from the address column failed; the bare
+  name still resolved.
+
+## 0.9.5 — 2026-09-09
+
+- `detect_self` / `watch` inherit session id from an ancestor `grok --resume <sid>`
+  when `GROK_SESSION_ID` is unset. Without that walk, `watch --as DISPLAY` bound a
+  name-key and never saw the session inbox.
+
+## 0.9.4 — 2026-09-09
+
+- `_herdr_cmd` finds `herdr` in `$PATH`, then `~/.local/bin/herdr`. Claude MCP
+  stdio often has `PATH=/usr/bin:/bin`, so `list_agents` dropped Herdr Claude
+  seats and showed grok+usage only. Override: `PEER_BUS_HERDR_BIN`. Attach-client
+  panes still resolve via process-info (`attach <short-id>` → `claude agents --json`);
+  a test pins that shape.
+
+## 0.9.3 — 2026-09-08
+
+- Live roster prefers **Herdr** over tmux. Default on; `PEER_BUS_TMUX=1` still
+  scans tmux when that flock is the one running. `PEER_BUS_TMUX=0` skips tmux.
+
+## 0.9.2 — 2026-09-08
+
+- Herdr `claude attach` panes keep the shell window title; flock uses the pane
+  **label** when the title is still `user@host:cwd`. Process-info also reads
+  `attach <short-id>` the same way as `--resume`.
+
+- MCP `send_message` schema is `to` + `body` only. Extra fields (`display_name`,
+  `summary`) made some hosts drop `to`. Aliases `recipient`/`address` and a
+  first-line `TO Name [ref]` prefix recover a dropped `to`. Error text lists
+  the keys that arrived.
+- `peer-bus prune` (dry-run) / `peer-bus prune --apply` removes dead registry
+  rows, usage snaps whose sid is not live, and empty inboxes. Live flock sids,
+  still-alive pids, and inboxes with unread files stay.
+
+## 0.9.1 — 2026-09-08
+
+- Live roster includes **Herdr** session `agents` (`herdr --session agents agent list`),
+  same authority as tmux: a visible agent pane is live even when usage snapshots
+  are older than 30 minutes. `PEER_BUS_HERDR=0` disables; `PEER_BUS_HERDR_SESSION`
+  selects the session (default `agents`). Attach panes with no `agent_session` fall
+  back to `pane process-info` (`--resume` / `--session-id` argv, then pid environ).
+- Usage snaps overlay model/context only; they do not mark tmux/herdr rows stale
+  or rename a titled seat.
+- `peer-bus mail --flock` sums unread across live seats. `scripts/herdr-mail-status.sh`
+  prints a compact `mail N` for a multiplexer status bar.
+- MCP `send_message` returns `missing to` / `missing body` instead of a KeyError.
+
+## 0.9.0 — 2026-09-08
+
+- Roster `five_hour` is one account-wide **pool**, not a per-seat column. CLI prints
+  `POOL 5h N%` once; MCP `list_agents` / `flock` return `{pool, agents}`. Expired
+  windows (`five_hour_resets_at` in the past) are dropped — same predicate as
+  `pool_samples()`. Per-seat discriminator is `context` (`~` when the snapshot is
+  older than 5 minutes).
+- `receive_messages` returns **newest first**; `limit` caps the newest N. It still
+  does not consume — `ack_message` moves the file. (Watch peeks through the same
+  function.)
+- `watch` without `--as` re-execs with `--as <detect_self name>` so a launched
+  watcher shows the seat display name in `ps`, not an untitled python.
+
+## 0.8.0 — 2026-09-04
+
+- `watch` uses Linux inotify on `inbox/<key>/` (CREATE / MOVED_TO / CLOSE_WRITE);
+  `PEER_BUS_WATCH=poll` keeps the sleep backoff. Same one-line output.
+- `peer-bus mail` / MCP `mail_count`: unread file count, no bodies.
+- Claude statusline shows `mail N` when N>0. Grok statusline script +
+  `[ui.status_line]` (`mail N`, cached `flock N`).
+
+## 0.7.0 — 2026-09-04
+
+- Live roster (P1): `list_agents` / `peer-bus flock` prefer tmux pane title + pid tree
+  (`CLAUDE_CODE_SESSION_ID` / `GROK_SESSION_ID`), then grok `active_sessions` (pid must
+  be alive), then fresh usage snaps. Registry heartbeats and stale usage are not live
+  on their own. A work tracker is not presence.
+- `detect_self` names Claude seats from tmux/usage; never `grok-<sid>` for a Claude harness.
+- Skip usage `throttle.json` / `guard-state.json`. Ghost registry names (inbox-loop
+  subagents, `anon-*`) stay out of the default list.
+- MCP tool `flock` aliases `list_agents`. `PEER_BUS_TMUX=0` disables the tmux scan.
+- Collapse wrapper Grok sids that share a pid with a named seat. Grow `[ref]` past 6 chars when prefixes collide.
+- Registry heartbeats (including live MCP stdio pids) are never a seat.
+
 ## 0.6.6 — 2026-08-21
 
 - Document accepted operator model: user instructs each session to listen; no Grok push-wake
