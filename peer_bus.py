@@ -48,7 +48,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-PEER_BUS_VERSION = "0.10.0"
+PEER_BUS_VERSION = "0.11.0"
 # pool.schema: 1 = five_hour only; 2 = five_hour + seven_day + state/age_min
 POOL_SCHEMA = 2
 
@@ -1121,6 +1121,7 @@ def heartbeat(self_info: dict[str, Any] | None = None) -> dict[str, Any]:
         "ts": _now(),
         "epoch": time.time(),
         "pid": os.getpid(),
+        "bus_version": me.get("bus_version") or PEER_BUS_VERSION,
     }
     path.write_text(json.dumps(payload, indent=2) + "\n")
     try:
@@ -1226,22 +1227,112 @@ def _registry_agents(stale_min: float = 15.0) -> list[dict[str, Any]]:
         pid = data.get("pid")
         alive = _pid_alive(pid)
         ghost = _is_ghost_name(str(name))
-        out.append(
-            {
-                "key": key,
-                "name": name,
-                "ref": str(sid)[:6] if sid else key[:6],
-                "session_id": sid,
-                "harness": data.get("harness") or "unknown",
-                "state": "live" if alive and not ghost else "stale",
-                "cwd": data.get("cwd"),
-                "pid": pid,
-                "age_min": round(age_min, 1),
-                "address": f"{name} [{str(sid)[:6]}]" if sid else name,
-                "source": "registry",
-            }
-        )
+        row = {
+            "key": key,
+            "name": name,
+            "ref": str(sid)[:6] if sid else key[:6],
+            "session_id": sid,
+            "harness": data.get("harness") or "unknown",
+            "state": "live" if alive and not ghost else "stale",
+            "cwd": data.get("cwd"),
+            "pid": pid,
+            "age_min": round(age_min, 1),
+            "address": f"{name} [{str(sid)[:6]}]" if sid else name,
+            "source": "registry",
+        }
+        ver = data.get("bus_version")
+        if ver:
+            row["bus_version"] = str(ver)
+        out.append(row)
     return out
+
+
+def _fresh_heartbeats_by_name(
+    rows: list[dict[str, Any]], *, max_age_min: float = _CONTEXT_STALE_MIN
+) -> dict[str, list[dict[str, Any]]]:
+    """Display name → fresh registry heartbeats. Not a seat list."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        name = str(row.get("name") or "")
+        if not name or _is_ghost_name(name):
+            continue
+        try:
+            age = float(row.get("age_min"))
+        except (TypeError, ValueError):
+            continue
+        if age > max_age_min:
+            continue
+        grouped.setdefault(name, []).append(row)
+    return grouped
+
+
+def _overlay_heartbeat_reader(
+    by_sid: dict[str, dict[str, Any]],
+    presence_by_name: dict[str, str],
+    registry_rows: list[dict[str, Any]],
+) -> None:
+    """Rebind a live pane to the sid its MCP recv actually uses.
+
+    A fresh heartbeat is the reader key. Registry python pids stay off the
+    live roster as seats.
+    """
+    fresh = _fresh_heartbeats_by_name(registry_rows)
+    for sid, row in list(by_sid.items()):
+        name = str(row.get("name") or "")
+        for hb in fresh.get(name) or []:
+            hsid = str(hb.get("session_id") or hb.get("key") or "")
+            if hsid == sid and hb.get("bus_version"):
+                row["bus_version"] = hb["bus_version"]
+                break
+    for name, auth_sid in list(presence_by_name.items()):
+        hits = fresh.get(name) or []
+        sids = {str(h.get("session_id") or h.get("key") or "") for h in hits}
+        sids.discard("")
+        if len(sids) != 1:
+            continue
+        hsid = next(iter(sids))
+        newest = min(
+            hits, key=lambda h: float(h["age_min"]) if h.get("age_min") is not None else 0.0
+        )
+        if hsid == auth_sid:
+            if newest.get("bus_version") and auth_sid in by_sid:
+                by_sid[auth_sid]["bus_version"] = newest["bus_version"]
+            continue
+        if hsid in by_sid and by_sid[hsid].get("source") in {"herdr", "tmux", "grok"}:
+            continue
+        if auth_sid not in by_sid:
+            continue
+        auth = by_sid.pop(auth_sid)
+        auth["session_id"] = hsid
+        auth["key"] = _safe_key(hsid)
+        if newest.get("bus_version"):
+            auth["bus_version"] = newest["bus_version"]
+        by_sid[hsid] = auth
+        presence_by_name[name] = hsid
+
+
+def _heartbeat_key_warning(recipient: dict[str, Any]) -> str | None:
+    name = str(recipient.get("name") or "")
+    want = _safe_key(str(recipient.get("key") or recipient.get("session_id") or ""))
+    if not name or not want:
+        return None
+    grouped = _fresh_heartbeats_by_name(_registry_agents())
+    hits = grouped.get(name) or []
+    sids = {_safe_key(str(h.get("session_id") or h.get("key") or "")) for h in hits}
+    sids.discard("")
+    if not sids:
+        return None
+    if len(sids) > 1:
+        return (
+            f"multiple fresh heartbeats for {name}; "
+            "MCP recv may not read this inbox"
+        )
+    hb = next(iter(sids))
+    if hb == want:
+        return None
+    return (
+        f"heartbeat key {hb} ≠ addressed {want}; MCP recv may miss this inbox"
+    )
 
 
 def _row_name_score(row: dict[str, Any]) -> int:
@@ -1405,7 +1496,8 @@ def list_agents(include_stale: bool = False) -> list[dict[str, Any]]:
     """Live roster: herdr agents, then tmux pane, then grok pids, then usage overlay.
 
     Registry heartbeats and stale usage snaps are not live on their own.
-    A work tracker is not presence.
+    A work tracker is not presence. A fresh heartbeat may rebind a live
+    pane's sid to the inbox that MCP recv actually reads.
     """
     _ensure_dirs()
     by_sid: dict[str, dict[str, Any]] = {}
@@ -1469,30 +1561,100 @@ def list_agents(include_stale: bool = False) -> list[dict[str, Any]]:
         g["key"] = _safe_key(sid)
         by_sid[sid] = g
 
+    presence_by_name: dict[str, str] = {}
+    for sid, row in by_sid.items():
+        if row.get("source") not in {"herdr", "tmux", "grok"}:
+            continue
+        if row.get("state") == "stale":
+            continue
+        name = str(row.get("name") or "")
+        if name and name not in presence_by_name:
+            presence_by_name[name] = sid
+
+    usage_rows: list[dict[str, Any]] = []
     for u in _usage_agents():
         sid = str(u.get("session_id") or "")
         if not sid or sid in _USAGE_SKIP_STEMS or _is_ghost_name(str(u.get("name") or "")):
             continue
-        fresh = u.get("state") == "live"
-        if sid in by_sid:
-            row = by_sid[sid]
-            if u.get("model"):
-                row["model"] = u["model"]
-            _overlay_context(row, u)
-            row["age_min"] = u.get("age_min")
-            if row.get("source") not in _AUTHORITY_SOURCES:
-                if fresh:
-                    row["state"] = "live"
-                current = str(row.get("name") or "")
-                if current.startswith("grok-") or current.startswith("claude-"):
-                    _overlay_name(row, str(u.get("name") or ""))
-            continue
-        u = dict(u)
-        u["key"] = _safe_key(sid)
-        _overlay_context(u, u)
-        by_sid[sid] = u
+        usage_rows.append(u)
+    consumed_usage: set[str] = set()
 
-    for r in _registry_agents():
+    for u in usage_rows:
+        sid = str(u.get("session_id") or "")
+        if sid not in by_sid:
+            continue
+        row = by_sid[sid]
+        if u.get("model"):
+            row["model"] = u["model"]
+        _overlay_context(row, u)
+        row["age_min"] = u.get("age_min")
+        if row.get("source") not in _AUTHORITY_SOURCES:
+            if u.get("state") == "live":
+                row["state"] = "live"
+            current = str(row.get("name") or "")
+            if current.startswith("grok-") or current.startswith("claude-"):
+                _overlay_name(row, str(u.get("name") or ""))
+        consumed_usage.add(sid)
+
+    live_usage_sids = {
+        str(u.get("session_id") or "") for u in usage_rows if u.get("state") == "live"
+    }
+    for name, auth_sid in list(presence_by_name.items()):
+        named = [u for u in usage_rows if str(u.get("name") or "") == name]
+        if not named:
+            continue
+        newest = min(
+            named,
+            key=lambda u: float(u["age_min"]) if u.get("age_min") is not None else 1e9,
+        )
+        usid = str(newest.get("session_id") or "")
+        if not usid or usid == auth_sid:
+            continue
+        if auth_sid in live_usage_sids:
+            continue
+        live_extra = [
+            u
+            for u in named
+            if u.get("state") == "live" and str(u.get("session_id") or "") != auth_sid
+        ]
+        if len(live_extra) > 1:
+            continue
+        if usid in by_sid and by_sid[usid].get("source") in {"herdr", "tmux", "grok"}:
+            continue
+        auth = by_sid.pop(auth_sid)
+        auth["session_id"] = usid
+        auth["key"] = _safe_key(usid)
+        if newest.get("model"):
+            auth["model"] = newest["model"]
+        _overlay_context(auth, newest)
+        auth["age_min"] = newest.get("age_min")
+        by_sid[usid] = auth
+        presence_by_name[name] = usid
+        consumed_usage.add(usid)
+
+    for u in usage_rows:
+        sid = str(u.get("session_id") or "")
+        if not sid or sid in by_sid or sid in consumed_usage:
+            continue
+        name = str(u.get("name") or "")
+        if name in presence_by_name:
+            if not include_stale:
+                continue
+            extra = dict(u)
+            extra["key"] = _safe_key(sid)
+            extra["state"] = "stale"
+            _overlay_context(extra, extra)
+            by_sid[sid] = extra
+            continue
+        extra = dict(u)
+        extra["key"] = _safe_key(sid)
+        _overlay_context(extra, extra)
+        by_sid[sid] = extra
+
+    registry_rows = _registry_agents()
+    _overlay_heartbeat_reader(by_sid, presence_by_name, registry_rows)
+
+    for r in registry_rows:
         sid = str(r.get("session_id") or "")
         if not sid:
             continue
@@ -1683,6 +1845,10 @@ def send_message(
         raise ValueError(f"body too large ({len(body)} > {MAX_BODY})")
 
     recipient = resolve_recipient(to)
+    warning = recipient.get("warning")
+    hb_warn = _heartbeat_key_warning(recipient)
+    if hb_warn:
+        warning = f"{warning}; {hb_warn}" if warning else hb_warn
     dest_dir = _inbox_dir(recipient["key"], create=True)
 
     existing = list(dest_dir.glob("*.json"))
@@ -1751,7 +1917,7 @@ def send_message(
         "path": str(path),
         "to": envelope["to"],
         "from": envelope["from"],
-        "warning": recipient.get("warning"),
+        "warning": warning,
         "wake": wake,
         "note": "acceptance only — peer must recv/drain; success≠read",
     }

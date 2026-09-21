@@ -33,7 +33,7 @@ peer-bus is a **cooperative, same-user** agent bus. It is not a multi-tenant sec
 
 ## `send` success means acceptance
 
-`ok: true` means the file was written. It does not mean a peer read it. Treat silence as a channel/artefact check, not proof of non-work.
+`ok: true` means the file was written. It does not mean a peer read it. Treat silence as a channel/artefact check, not proof of non-work. A `warning` on send means a fresh heartbeat for that name disagrees with the addressed key — the MCP `recv` may be looking at a different inbox.
 
 ## Untrusted content
 

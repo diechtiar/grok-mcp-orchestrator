@@ -630,6 +630,346 @@ class RosterTests(unittest.TestCase):
         self.assertEqual(rows[0]["source"], "herdr")
         self.assertEqual(rows[0]["address"], "Beau [804be4]")
 
+    def _usage_row(
+        self,
+        name: str,
+        sid: str,
+        *,
+        live: bool = True,
+        age: float = 0.5,
+        context: str = "20",
+    ) -> dict:
+        return {
+            "key": sid,
+            "name": name,
+            "ref": sid[:6],
+            "session_id": sid,
+            "harness": "claude",
+            "state": "live" if live else "stale",
+            "source": "usage",
+            "age_min": age,
+            "context": context,
+            "address": f"{name} [{sid[:6]}]",
+        }
+
+    def test_usage_ghost_same_name_not_a_second_live_seat(self) -> None:
+        """Respawn leaves a fresh-looking usage file; Herdr is the live pane."""
+        herdr_sid = "a71fb608-309d-499e-9ac5-9269e94da410"
+        ghost_sid = "ba952cc3-d7d8-446f-98b1-b196c0cba97b"
+        seat = {
+            "name": "Ada",
+            "session_id": herdr_sid,
+            "harness": "claude",
+            "pane_id": "w5:p9",
+        }
+        # Herdr sid also has a usage snap, so do not rebind to the ghost.
+        usage = [
+            self._usage_row("Ada", herdr_sid, age=0.2, context="31"),
+            self._usage_row("Ada", ghost_sid, age=1.0, context="12"),
+        ]
+        with mock.patch.object(peer_bus, "_tmux_seats", return_value=[]):
+            with mock.patch.object(peer_bus, "_herdr_seats", return_value=[seat]):
+                with mock.patch.object(peer_bus, "_grok_agents", return_value=[]):
+                    with mock.patch.object(peer_bus, "_usage_agents", return_value=usage):
+                        with mock.patch.object(peer_bus, "_registry_agents", return_value=[]):
+                            live = peer_bus.list_agents(False)
+                            all_rows = peer_bus.list_agents(True)
+        self.assertEqual([r["session_id"] for r in live], [herdr_sid])
+        self.assertEqual(live[0]["source"], "herdr")
+        self.assertFalse(live[0].get("name_collision"))
+        self.assertEqual(live[0]["context"], "31")
+        ghost = [r for r in all_rows if r["session_id"] == ghost_sid]
+        self.assertEqual(len(ghost), 1)
+        self.assertEqual(ghost[0]["state"], "stale")
+
+    def test_herdr_rebinding_to_fresh_usage_sid_same_name(self) -> None:
+        """Herdr agent_session can disagree with the session-bound MCP/usage sid."""
+        pane_sid = "81a6449f-7d83-4991-971f-1d80e50cd781"
+        mcp_sid = "36ff0e60-8ac2-41c0-b496-c031848d7d7a"
+        seat = {
+            "name": "Beau",
+            "session_id": pane_sid,
+            "harness": "claude",
+            "pane_id": "w5:p7",
+        }
+        usage = [self._usage_row("Beau", mcp_sid, age=0.1, context="44")]
+        with mock.patch.object(peer_bus, "_tmux_seats", return_value=[]):
+            with mock.patch.object(peer_bus, "_herdr_seats", return_value=[seat]):
+                with mock.patch.object(peer_bus, "_grok_agents", return_value=[]):
+                    with mock.patch.object(peer_bus, "_usage_agents", return_value=usage):
+                        with mock.patch.object(peer_bus, "_registry_agents", return_value=[]):
+                            live = peer_bus.list_agents(False)
+        self.assertEqual(len(live), 1)
+        self.assertEqual(live[0]["session_id"], mcp_sid)
+        self.assertEqual(live[0]["key"], peer_bus._safe_key(mcp_sid))
+        self.assertEqual(live[0]["source"], "herdr")
+        self.assertEqual(live[0]["pane_id"], "w5:p7")
+        self.assertEqual(live[0]["address"], "Beau [36ff0e]")
+        self.assertFalse(live[0].get("name_collision"))
+        chosen = peer_bus.resolve_recipient(
+            live[0]["address"], agents=live
+        )
+        self.assertEqual(chosen["session_id"], mcp_sid)
+
+    def test_herdr_rebinding_picks_newer_stale_usage_over_pane_sid(self) -> None:
+        """Pane sid still has an old usage file; the MCP sid is newer but past 30 min."""
+        pane_sid = "81a6449f-7d83-4991-971f-1d80e50cd781"
+        mcp_sid = "36ff0e60-8ac2-41c0-b496-c031848d7d7a"
+        seat = {
+            "name": "Beau",
+            "session_id": pane_sid,
+            "harness": "claude",
+            "pane_id": "w5:p7",
+        }
+        usage = [
+            self._usage_row("Beau", pane_sid, live=False, age=58.0, context="1"),
+            self._usage_row("Beau", mcp_sid, live=False, age=32.0, context="44"),
+        ]
+        with mock.patch.object(peer_bus, "_tmux_seats", return_value=[]):
+            with mock.patch.object(peer_bus, "_herdr_seats", return_value=[seat]):
+                with mock.patch.object(peer_bus, "_grok_agents", return_value=[]):
+                    with mock.patch.object(peer_bus, "_usage_agents", return_value=usage):
+                        with mock.patch.object(peer_bus, "_registry_agents", return_value=[]):
+                            live = peer_bus.list_agents(False)
+        self.assertEqual(len(live), 1)
+        self.assertEqual(live[0]["session_id"], mcp_sid)
+        self.assertEqual(live[0]["source"], "herdr")
+        self.assertEqual(live[0]["address"], "Beau [36ff0e]")
+
+    def test_two_live_usage_same_name_do_not_rebind_herdr(self) -> None:
+        pane_sid = "aaaaaaaa-1111-2222-3333-444444444444"
+        seat = {
+            "name": "Cora",
+            "session_id": pane_sid,
+            "harness": "claude",
+            "pane_id": "w5:p6",
+        }
+        usage = [
+            self._usage_row("Cora", "bbbbbbbb-1111-2222-3333-444444444444", age=0.2),
+            self._usage_row("Cora", "cccccccc-1111-2222-3333-444444444444", age=0.4),
+        ]
+        with mock.patch.object(peer_bus, "_tmux_seats", return_value=[]):
+            with mock.patch.object(peer_bus, "_herdr_seats", return_value=[seat]):
+                with mock.patch.object(peer_bus, "_grok_agents", return_value=[]):
+                    with mock.patch.object(peer_bus, "_usage_agents", return_value=usage):
+                        with mock.patch.object(peer_bus, "_registry_agents", return_value=[]):
+                            live = peer_bus.list_agents(False)
+        self.assertEqual([r["session_id"] for r in live], [pane_sid])
+        self.assertEqual(live[0]["source"], "herdr")
+
+    def test_usage_only_seat_still_listed(self) -> None:
+        sid = "c662b3ea-d616-4c37-8a78-74ae8272b578"
+        usage = [self._usage_row("Ada", sid, age=0.3, context="16")]
+        with mock.patch.object(peer_bus, "_tmux_seats", return_value=[]):
+            with mock.patch.object(peer_bus, "_herdr_seats", return_value=[]):
+                with mock.patch.object(peer_bus, "_grok_agents", return_value=[]):
+                    with mock.patch.object(peer_bus, "_usage_agents", return_value=usage):
+                        with mock.patch.object(peer_bus, "_registry_agents", return_value=[]):
+                            live = peer_bus.list_agents(False)
+        self.assertEqual(len(live), 1)
+        self.assertEqual(live[0]["source"], "usage")
+        self.assertEqual(live[0]["session_id"], sid)
+
+    def _hb_row(
+        self,
+        name: str,
+        sid: str,
+        *,
+        age: float = 0.2,
+        bus_version: str | None = "0.11.0",
+    ) -> dict:
+        return {
+            "key": sid,
+            "name": name,
+            "ref": sid[:6],
+            "session_id": sid,
+            "harness": "claude",
+            "state": "stale",
+            "source": "registry",
+            "age_min": age,
+            "bus_version": bus_version,
+            "address": f"{name} [{sid[:6]}]",
+        }
+
+    def test_heartbeat_writes_bus_version(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            _cleared_sid_env(
+                CLAUDE_CODE_SESSION_ID="aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+                PEER_BUS_HARNESS="claude",
+            ),
+            clear=False,
+        ):
+            me = peer_bus.detect_self("Ada")
+            out = peer_bus.heartbeat(me)
+        self.assertEqual(out["bus_version"], peer_bus.PEER_BUS_VERSION)
+        path = peer_bus._registry_path(me["key"])
+        on_disk = json.loads(path.read_text())
+        self.assertEqual(on_disk["bus_version"], peer_bus.PEER_BUS_VERSION)
+
+    def test_flock_overlays_bus_version_from_matching_heartbeat(self) -> None:
+        sid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        seat = {
+            "name": "Ada",
+            "session_id": sid,
+            "harness": "claude",
+            "pane_id": "w5:p1",
+        }
+        with mock.patch.object(peer_bus, "_tmux_seats", return_value=[]):
+            with mock.patch.object(peer_bus, "_herdr_seats", return_value=[seat]):
+                with mock.patch.object(peer_bus, "_grok_agents", return_value=[]):
+                    with mock.patch.object(peer_bus, "_usage_agents", return_value=[]):
+                        with mock.patch.object(
+                            peer_bus,
+                            "_registry_agents",
+                            return_value=[self._hb_row("Ada", sid, bus_version="0.11.0")],
+                        ):
+                            live = peer_bus.list_agents(False)
+        self.assertEqual(len(live), 1)
+        self.assertEqual(live[0]["session_id"], sid)
+        self.assertEqual(live[0]["bus_version"], "0.11.0")
+        self.assertEqual(live[0]["source"], "herdr")
+
+    def test_heartbeat_rebinding_beats_herdr_and_usage_same_sid(self) -> None:
+        """MCP whoami key can disagree with the multiplexer and usage (stale-stdio window)."""
+        herdr_sid = "9a8ec307-a1d1-446e-8ab6-7a27b578efba"
+        mcp_sid = "50c56362-1b51-4dc1-9130-c204605f1758"
+        seat = {
+            "name": "Ada",
+            "session_id": herdr_sid,
+            "harness": "claude",
+            "pane_id": "w5:p1",
+        }
+        usage = [self._usage_row("Ada", herdr_sid, age=0.1, context="40")]
+        hb = [self._hb_row("Ada", mcp_sid, age=0.2, bus_version="0.9.9")]
+        with mock.patch.object(peer_bus, "_tmux_seats", return_value=[]):
+            with mock.patch.object(peer_bus, "_herdr_seats", return_value=[seat]):
+                with mock.patch.object(peer_bus, "_grok_agents", return_value=[]):
+                    with mock.patch.object(peer_bus, "_usage_agents", return_value=usage):
+                        with mock.patch.object(peer_bus, "_registry_agents", return_value=hb):
+                            live = peer_bus.list_agents(False)
+        self.assertEqual(len(live), 1)
+        self.assertEqual(live[0]["session_id"], mcp_sid)
+        self.assertEqual(live[0]["key"], peer_bus._safe_key(mcp_sid))
+        self.assertEqual(live[0]["source"], "herdr")
+        self.assertEqual(live[0]["pane_id"], "w5:p1")
+        self.assertEqual(live[0]["bus_version"], "0.9.9")
+        self.assertEqual(live[0]["address"], "Ada [50c563]")
+
+    def test_stale_heartbeat_does_not_rebind(self) -> None:
+        herdr_sid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        old_sid = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+        seat = {
+            "name": "Ada",
+            "session_id": herdr_sid,
+            "harness": "claude",
+            "pane_id": "w5:p1",
+        }
+        hb = [self._hb_row("Ada", old_sid, age=12.0)]
+        with mock.patch.object(peer_bus, "_tmux_seats", return_value=[]):
+            with mock.patch.object(peer_bus, "_herdr_seats", return_value=[seat]):
+                with mock.patch.object(peer_bus, "_grok_agents", return_value=[]):
+                    with mock.patch.object(peer_bus, "_usage_agents", return_value=[]):
+                        with mock.patch.object(peer_bus, "_registry_agents", return_value=hb):
+                            live = peer_bus.list_agents(False)
+        self.assertEqual(live[0]["session_id"], herdr_sid)
+
+    def test_two_fresh_heartbeats_same_name_do_not_rebind(self) -> None:
+        herdr_sid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        seat = {
+            "name": "Ada",
+            "session_id": herdr_sid,
+            "harness": "claude",
+            "pane_id": "w5:p1",
+        }
+        hb = [
+            self._hb_row("Ada", "bbbbbbbb-cccc-dddd-eeee-ffffffffffff", age=0.2),
+            self._hb_row("Ada", "cccccccc-dddd-eeee-ffff-000000000000", age=0.4),
+        ]
+        with mock.patch.object(peer_bus, "_tmux_seats", return_value=[]):
+            with mock.patch.object(peer_bus, "_herdr_seats", return_value=[seat]):
+                with mock.patch.object(peer_bus, "_grok_agents", return_value=[]):
+                    with mock.patch.object(peer_bus, "_usage_agents", return_value=[]):
+                        with mock.patch.object(peer_bus, "_registry_agents", return_value=hb):
+                            live = peer_bus.list_agents(False)
+        self.assertEqual(live[0]["session_id"], herdr_sid)
+
+    def test_send_warns_when_fresh_heartbeat_key_differs(self) -> None:
+        herdr_sid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        mcp_sid = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff"
+        seat = {
+            "name": "Beau",
+            "session_id": herdr_sid,
+            "harness": "claude",
+            "pane_id": "w5:p2",
+        }
+        # Two fresh heartbeats: overlay will not rebind; send must still warn.
+        hb = [
+            self._hb_row("Beau", mcp_sid, age=0.2),
+            self._hb_row("Beau", "cccccccc-dddd-eeee-ffff-000000000000", age=0.3),
+        ]
+        saved_trust = peer_bus.TRUST_NAME_KEYS
+        peer_bus.TRUST_NAME_KEYS = True
+        env = _cleared_sid_env(
+            CLAUDE_CODE_SESSION_ID="11111111-1111-1111-1111-111111111111",
+            PEER_BUS_HARNESS="claude",
+        )
+        try:
+            with mock.patch.dict(os.environ, env, clear=False):
+                sender = peer_bus.detect_self("Ada")
+                with mock.patch.object(peer_bus, "_herdr_seats", return_value=[seat]):
+                    with mock.patch.object(peer_bus, "_tmux_seats", return_value=[]):
+                        with mock.patch.object(peer_bus, "_grok_agents", return_value=[]):
+                            with mock.patch.object(peer_bus, "_usage_agents", return_value=[]):
+                                with mock.patch.object(
+                                    peer_bus, "_registry_agents", return_value=hb
+                                ):
+                                    out = peer_bus.send_message(
+                                        f"Beau [{herdr_sid[:6]}]",
+                                        "ping",
+                                        self_info=sender,
+                                    )
+        finally:
+            peer_bus.TRUST_NAME_KEYS = saved_trust
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["accepted"])
+        self.assertIn("heartbeat", (out.get("warning") or "").lower())
+
+    def test_send_no_warning_when_heartbeat_matches(self) -> None:
+        sid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+        seat = {
+            "name": "Beau",
+            "session_id": sid,
+            "harness": "claude",
+            "pane_id": "w5:p2",
+        }
+        hb = [self._hb_row("Beau", sid, age=0.2)]
+        saved_trust = peer_bus.TRUST_NAME_KEYS
+        peer_bus.TRUST_NAME_KEYS = True
+        env = _cleared_sid_env(
+            CLAUDE_CODE_SESSION_ID="11111111-1111-1111-1111-111111111111",
+            PEER_BUS_HARNESS="claude",
+        )
+        try:
+            with mock.patch.dict(os.environ, env, clear=False):
+                sender = peer_bus.detect_self("Ada")
+                with mock.patch.object(peer_bus, "_herdr_seats", return_value=[seat]):
+                    with mock.patch.object(peer_bus, "_tmux_seats", return_value=[]):
+                        with mock.patch.object(peer_bus, "_grok_agents", return_value=[]):
+                            with mock.patch.object(peer_bus, "_usage_agents", return_value=[]):
+                                with mock.patch.object(
+                                    peer_bus, "_registry_agents", return_value=hb
+                                ):
+                                    out = peer_bus.send_message(
+                                        f"Beau [{sid[:6]}]",
+                                        "ping",
+                                        self_info=sender,
+                                    )
+        finally:
+            peer_bus.TRUST_NAME_KEYS = saved_trust
+        self.assertTrue(out["ok"])
+        self.assertFalse(out.get("warning"))
+
     def test_sid_from_claude_bg_job_prefers_pid(self) -> None:
         jobs = [
             {"name": "Ada", "session_id": "d208ebda-d4f3-4b97-86dd-3d6861df55af", "pid": None},
@@ -1375,7 +1715,7 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
         with mock.patch.dict(os.environ, self.env, clear=False):
             me = peer_bus.detect_self("Ada")
         self.assertEqual(me["bus_version"], peer_bus.PEER_BUS_VERSION)
-        self.assertEqual(peer_bus.PEER_BUS_VERSION, "0.10.0")
+        self.assertEqual(peer_bus.PEER_BUS_VERSION, "0.11.0")
 
     def test_envelope_carries_bus_version(self) -> None:
         with mock.patch.dict(os.environ, self.env, clear=False):
@@ -1383,7 +1723,7 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
             peer_bus.send_message("Beau", "ping", self_info=sender)
             msgs = peer_bus.receive_messages(peer_bus.detect_self("Beau"))
         self.assertEqual(len(msgs), 1)
-        self.assertEqual(msgs[0]["bus_version"], "0.10.0")
+        self.assertEqual(msgs[0]["bus_version"], "0.11.0")
 
     def test_ack_writes_sender_receipt(self) -> None:
         with mock.patch.dict(os.environ, self.env, clear=False):
@@ -1424,15 +1764,15 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
         finally:
             peer_bus.USAGE_DIR = saved
         self.assertTrue(out["ok"])
-        self.assertEqual(out["bus_version"], "0.10.0")
+        self.assertEqual(out["bus_version"], "0.11.0")
         names = {c["name"]: c for c in out["checks"]}
         self.assertTrue(names["cli_version"]["ok"])
-        self.assertEqual(names["cli_version"]["detail"], "0.10.0")
+        self.assertEqual(names["cli_version"]["detail"], "0.11.0")
         self.assertTrue(names["herdr"].get("skipped"))
         self.assertTrue(names["usage_dir"].get("skipped"))
         self.assertTrue(names["pool_schema"].get("skipped"))
         self.assertTrue(names["mcp_version"]["ok"])
-        self.assertEqual(names["mcp_version"]["detail"], "0.10.0")
+        self.assertEqual(names["mcp_version"]["detail"], "0.11.0")
 
     def test_doctor_fails_on_pool_schema_mismatch(self) -> None:
         saved = peer_bus.USAGE_DIR
@@ -1482,7 +1822,7 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
             check=False,
         )
         payload = json.loads(proc.stdout)
-        self.assertEqual(payload["bus_version"], "0.10.0")
+        self.assertEqual(payload["bus_version"], "0.11.0")
         self.assertIn("checks", payload)
         self.assertEqual(proc.returncode, 0 if payload["ok"] else 1)
 
@@ -1501,7 +1841,7 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0)
         payload = json.loads(proc.stdout.splitlines()[0])
-        self.assertEqual(payload["result"]["serverInfo"]["version"], "0.10.0")
+        self.assertEqual(payload["result"]["serverInfo"]["version"], "0.11.0")
 
 
 if __name__ == "__main__":

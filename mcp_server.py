@@ -17,7 +17,7 @@ from typing import Any
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
 import peer_bus  # noqa: E402
 
-SERVER_INFO = {"name": "peer-bus", "version": "0.10.0"}
+SERVER_INFO = {"name": "peer-bus", "version": "0.11.0"}
 PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS = [
@@ -39,7 +39,7 @@ TOOLS = [
     },
     {
         "name": "send_message",
-        "description": "Send to a live peer inbox (acceptance only). Pass only to (Name [ref] from flock) and body. Do not pass display_name or summary — extra fields have made the host drop to.",
+        "description": "Send to a live peer inbox (acceptance only). Pass only to (Name [ref] from flock) and body. Do not pass display_name or summary — extra fields have made the host drop to. warning means a fresh heartbeat key disagrees with the addressed inbox; ok is still file-written.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -82,7 +82,7 @@ TOOLS = [
     },
     {
         "name": "heartbeat",
-        "description": "Publish presence for THIS session.",
+        "description": "Publish presence for THIS session (includes bus_version). A fresh heartbeat is the reader key for flock rebind — not a live seat on its own.",
         "inputSchema": {
             "type": "object",
             "properties": {"display_name": {"type": "string"}},

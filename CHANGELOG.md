@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.11.0 — 2026-09-21
+
+- Heartbeat registry payload includes `bus_version`. Flock overlays it onto the
+  matching live row.
+- A **fresh** heartbeat (≤ 5 min) for a display name is the reader key: if it
+  disagrees with Herdr/tmux/grok (and with usage), the live flock row rebinds
+  to the heartbeat sid so `send` writes the inbox MCP `recv` actually reads.
+  Two fresh heartbeats for the same name: no rebind. Registry pid is still not
+  a seat.
+- `send` sets `warning` when a leftover heartbeat key ≠ the addressed key
+  (`ok` remains file-written). No dual-inbox copy.
+
+## 0.10.1 — 2026-09-21
+
+- Default `flock` no longer lists a second live row from a usage snapshot when
+  Herdr/tmux/grok already has that display name (respawn leftovers). Those
+  extra snaps stay visible as `stale` with `--all`.
+- When a live pane's session id has no usage file, and exactly one live usage
+  snap shares the seat name, the flock row is rebound to that session-bound
+  sid so `send` targets the inbox the MCP actually reads.
+
 ## 0.10.0 — 2026-09-21
 
 - `bus_version` is on `whoami`, `flock`/`list_agents`, and each message envelope.

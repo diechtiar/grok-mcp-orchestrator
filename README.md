@@ -2,7 +2,7 @@
 
 Cross-harness **ListAgents / SendMessage** for multi-session agent orchestration.
 
-**Version:** 0.10.0 · **License:** MIT · **Python:** 3.11+ (stdlib only)
+**Version:** 0.11.0 · **License:** MIT · **Python:** 3.11+ (stdlib only)
 
 Claude Code already has native `SendMessage` / `ListAgents`. This project gives **Grok** (and Claude) the same verbs over a small **filesystem bus**, plus a zero-dependency **stdio MCP server**.
 
@@ -15,7 +15,7 @@ Project board: https://github.com/users/diechtiar/projects/4
 ## Features
 
 - Discover live peers (`list` / `flock`: tmux pane title + pid, Herdr `agents`, Grok actives with a live pid, usage overlay; registry is not presence). Quota is one `pool` header (`five_hour` and `seven_day`, each with its own reset; `state` live|stale from snapshot age; `schema` integer). Per-seat discriminator is `context`. `bus_version` is on whoami, flock, and each envelope.
-- Send / receive / ack messages (**acceptance ≠ delivery**). Recv is newest-first; ack consumes. Optional sender-side ack receipt (`PEER_BUS_ACK_RECEIPTS=0` to disable).
+- Send / receive / ack messages (**acceptance ≠ delivery**). Recv is newest-first; ack consumes. Optional sender-side ack receipt (`PEER_BUS_ACK_RECEIPTS=0` to disable). `send.warning` if a fresh heartbeat key disagrees with the addressed inbox.
 - `watch` — inotify on Linux (poll fallback); one line per new unread (`msg_id` + `from.address`)
 - `mail` — unread count, no bodies (statuslines use this)
 - Wake after accept — drop file + optional cmd/callback (never fails send)
