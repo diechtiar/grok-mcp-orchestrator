@@ -2,16 +2,17 @@
 
 Tracked on the [GitHub Project](https://github.com/users/diechtiar/projects/4).
 
-## Current (v0.9.8)
+## Current (v0.10.0)
 
 Stdlib CLI + stdio MCP. Live roster (Herdr, optional tmux, Grok pids, usage overlay).
 Send/recv/ack with session-bound keys. `watch` (inotify; `--max-runtime`). `mail`. `prune`.
+`bus_version` on whoami/flock/envelopes; `pool.schema`; `doctor`; optional ack receipts.
 Acceptance is not delivery. Same-UID cooperative bus — see [SECURITY.md](SECURITY.md).
 
 ## Next
 
 1. Native Grok dashboard inject — **blocked** on product APIs. Listen model stays pull (`recv` / `watch`).
-2. Publish tags for 0.9.7 / 0.9.8 when cutting a release.
+2. Publish tags when cutting a GitHub release.
 
 ## Non-goals
 
@@ -37,3 +38,5 @@ Acceptance is not delivery. Same-UID cooperative bus — see [SECURITY.md](SECUR
 - [x] Hyphenated refs, prune, ancestor session id, PATH herdr — **v0.9.1–0.9.6**
 - [x] Ambiguous-ref refuse, single roster fetch, watch max-runtime, generic docs — **v0.9.7**
 - [x] Multiplexer JSON schema pin + `self-test`; Claude inbox-socket dual-write — **v0.9.8**
+- [x] Independent 5h+7d pool windows, `pool.state` live|stale — **v0.9.9**
+- [x] `bus_version` on payloads, `pool.schema`, `doctor`, optional ack receipts — **v0.10.0**

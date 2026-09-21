@@ -17,13 +17,13 @@ from typing import Any
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
 import peer_bus  # noqa: E402
 
-SERVER_INFO = {"name": "peer-bus", "version": "0.9.9"}
+SERVER_INFO = {"name": "peer-bus", "version": "0.10.0"}
 PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS = [
     {
         "name": "list_agents",
-        "description": "Live flock as {pool, agents}. pool has five_hour and seven_day (each with its own reset) plus state live|stale from snapshot age. Per-seat discriminator is context. Send with name [ref] on collisions.",
+        "description": "Live flock as {bus_version, pool, agents}. pool.schema is an integer (2 = five_hour+seven_day+state). pool has five_hour and seven_day (each with its own reset) plus state live|stale from snapshot age. Per-seat discriminator is context. Send with name [ref] on collisions. Compare bus_version to CLI `peer-bus version` / `doctor`.",
         "inputSchema": {
             "type": "object",
             "properties": {"include_stale": {"type": "boolean", "default": False}},
@@ -31,7 +31,7 @@ TOOLS = [
     },
     {
         "name": "flock",
-        "description": "Same as list_agents — {pool, agents} live roster.",
+        "description": "Same as list_agents — {bus_version, pool, agents} live roster.",
         "inputSchema": {
             "type": "object",
             "properties": {"include_stale": {"type": "boolean", "default": False}},
@@ -65,7 +65,7 @@ TOOLS = [
     },
     {
         "name": "ack_message",
-        "description": "Ack a message in THIS session's inbox only.",
+        "description": "Ack a message in THIS session's inbox only. Writes an optional sender-side receipt unless PEER_BUS_ACK_RECEIPTS=0. A receipt is not proof the sender understood.",
         "inputSchema": {
             "type": "object",
             "properties": {"msg_id": {"type": "string"}},
@@ -74,7 +74,7 @@ TOOLS = [
     },
     {
         "name": "whoami",
-        "description": "Show this session's peer-bus identity (session-bound key) and heartbeat.",
+        "description": "Show this session's peer-bus identity (session-bound key), bus_version, and heartbeat. Compare bus_version to CLI `peer-bus version`; a mismatch means this MCP process predates the tree on disk.",
         "inputSchema": {
             "type": "object",
             "properties": {"display_name": {"type": "string"}},

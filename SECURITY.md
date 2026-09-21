@@ -28,6 +28,7 @@ peer-bus is a **cooperative, same-user** agent bus. It is not a multi-tenant sec
 | Prompt injection via bodies | Marked `untrusted`; CLI/MCP expose `body_for_model` / wrapped `body` |
 | Wake hook (`PEER_BUS_WAKE_CMD`) | Operator-supplied shell; runs only when `PEER_BUS_WAKE=1`; failures never undo accept |
 | Wake drop files under `wake/` | Same UID visibility as inbox; no secrets in summaries |
+| Ack receipts under `receipts/` | Same UID; sender-side “they acked” file, not proof of understanding; `PEER_BUS_ACK_RECEIPTS=0` to disable |
 | Claude inbox socket after accept | Same UID as SendMessage; opt out `PEER_BUS_CLAUDE_UDS=0`; failure never undoes accept |
 
 ## `send` success means acceptance

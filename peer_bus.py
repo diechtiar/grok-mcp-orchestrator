@@ -48,7 +48,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-PEER_BUS_VERSION = "0.9.9"
+PEER_BUS_VERSION = "0.10.0"
+# pool.schema: 1 = five_hour only; 2 = five_hour + seven_day + state/age_min
+POOL_SCHEMA = 2
 
 
 def _default_root() -> Path:
@@ -72,6 +74,7 @@ ROOT = _default_root().resolve()
 INBOX = ROOT / "inbox"
 REGISTRY = ROOT / "registry"
 WAKE = ROOT / "wake"
+RECEIPTS = ROOT / "receipts"
 # Claude / other harness snapshots — only if explicitly configured (no host-specific default)
 USAGE_DIR = _optional_dir("PEER_BUS_USAGE_DIR", "USAGE_DIR")
 GROK_HOME = Path(os.environ.get("GROK_HOME", str(Path.home() / ".grok"))).expanduser()
@@ -120,8 +123,9 @@ def _ensure_dirs() -> None:
     INBOX.mkdir(parents=True, exist_ok=True)
     REGISTRY.mkdir(parents=True, exist_ok=True)
     WAKE.mkdir(parents=True, exist_ok=True)
+    RECEIPTS.mkdir(parents=True, exist_ok=True)
     # Best-effort tighten bus dirs (some mounts ignore mode)
-    for path in (ROOT, INBOX, REGISTRY, WAKE):
+    for path in (ROOT, INBOX, REGISTRY, WAKE, RECEIPTS):
         try:
             os.chmod(path, 0o700)
         except OSError:
@@ -1085,6 +1089,7 @@ def detect_self(display_name: str | None = None) -> dict[str, Any]:
         key = _safe_key(name)
 
     return {
+        "bus_version": PEER_BUS_VERSION,
         "key": key,
         "name": name,
         "harness": harness or "unknown",
@@ -1383,12 +1388,17 @@ def pool_usage(now: float | None = None) -> dict[str, Any] | None:
         "state": "stale" if stale else "live",
         "source_name": best_data.get("name") or best_data.get("session_name"),
         "source_session": best_data.get("session") or best_data.get("session_id") or best_path.stem,
+        "schema": POOL_SCHEMA,
     }
 
 
 def roster(include_stale: bool = False) -> dict[str, Any]:
     """CLI/MCP view: pool header once, then agent rows (no per-row five_hour)."""
-    return {"pool": pool_usage(), "agents": list_agents(include_stale=include_stale)}
+    return {
+        "bus_version": PEER_BUS_VERSION,
+        "pool": pool_usage(),
+        "agents": list_agents(include_stale=include_stale),
+    }
 
 
 def list_agents(include_stale: bool = False) -> list[dict[str, Any]]:
@@ -1685,6 +1695,7 @@ def send_message(
         raise ValueError("refusing to overwrite existing/symlink message path")
 
     envelope = {
+        "bus_version": PEER_BUS_VERSION,
         "msg_id": msg_id,
         "ts": _now(),
         "type": msg_type,
@@ -1999,6 +2010,112 @@ def _emit_unread(me: dict[str, Any], seen: set[str]) -> int:
     return n
 
 
+def _write_ack_receipt(envelope: dict[str, Any], acker: dict[str, Any]) -> str | None:
+    """Sender-side receipt: they acked msg_id. Not proof they understood."""
+    fr = envelope.get("from") if isinstance(envelope.get("from"), dict) else {}
+    sender_key = str(fr.get("key") or "")
+    msg_id = str(envelope.get("msg_id") or "")
+    if not sender_key or not msg_id:
+        return None
+    try:
+        dest = RECEIPTS / _safe_key(sender_key)
+        dest.mkdir(parents=True, exist_ok=True)
+        _refuse_symlink(dest, "receipts")
+        path = dest / f"{msg_id}.json"
+        payload = {
+            "msg_id": msg_id,
+            "acked_at": envelope.get("acked_at") or _now(),
+            "by": {
+                "key": acker.get("key"),
+                "name": acker.get("name"),
+                "session_id": acker.get("session_id"),
+            },
+        }
+        path.write_text(json.dumps(payload, indent=2) + "\n")
+        if not _is_under(path.resolve(), RECEIPTS):
+            return None
+        return str(path)
+    except (OSError, ValueError):
+        return None
+
+
+def doctor() -> dict[str, Any]:
+    """CLI health: version, multiplexer schema, usage dir, pool schema. Not a daemon."""
+    checks: list[dict[str, Any]] = []
+    ok = True
+
+    checks.append({"name": "cli_version", "ok": True, "detail": PEER_BUS_VERSION})
+
+    if not _herdr_enabled():
+        checks.append({"name": "herdr", "ok": True, "skipped": True, "detail": "disabled"})
+    else:
+        ht = herdr_self_test()
+        if ht.get("skipped"):
+            checks.append({"name": "herdr", "ok": True, "skipped": True, "detail": "no binary"})
+        elif ht.get("ok"):
+            checks.append(
+                {"name": "herdr", "ok": True, "detail": f"n_agents={ht.get('n_agents', 0)}"}
+            )
+        else:
+            ok = False
+            checks.append(
+                {"name": "herdr", "ok": False, "detail": "; ".join(ht.get("errors") or [])}
+            )
+
+    if USAGE_DIR is None:
+        checks.append({"name": "usage_dir", "ok": True, "skipped": True, "detail": "unset"})
+    elif USAGE_DIR.is_dir():
+        checks.append({"name": "usage_dir", "ok": True, "detail": str(USAGE_DIR)})
+    else:
+        ok = False
+        checks.append({"name": "usage_dir", "ok": False, "detail": f"missing {USAGE_DIR}"})
+
+    pool = pool_usage()
+    if pool is None:
+        checks.append({"name": "pool_schema", "ok": True, "skipped": True, "detail": "no sample"})
+    elif pool.get("schema") == POOL_SCHEMA:
+        checks.append({"name": "pool_schema", "ok": True, "detail": str(POOL_SCHEMA)})
+    else:
+        ok = False
+        checks.append(
+            {
+                "name": "pool_schema",
+                "ok": False,
+                "detail": f"got {pool.get('schema')!r} want {POOL_SCHEMA}",
+            }
+        )
+
+    mcp_ver = _mcp_disk_version()
+    if mcp_ver == PEER_BUS_VERSION:
+        checks.append({"name": "mcp_version", "ok": True, "detail": mcp_ver})
+    elif mcp_ver is None:
+        checks.append(
+            {"name": "mcp_version", "ok": True, "skipped": True, "detail": "unreadable"}
+        )
+    else:
+        ok = False
+        checks.append(
+            {
+                "name": "mcp_version",
+                "ok": False,
+                "detail": f"got {mcp_ver!r} want {PEER_BUS_VERSION}",
+            }
+        )
+
+    return {"ok": ok, "bus_version": PEER_BUS_VERSION, "checks": checks}
+
+
+def _mcp_disk_version() -> str | None:
+    """SERVER_INFO version from the sibling stdio server on disk, not a live MCP pid."""
+    path = Path(__file__).resolve().parent / "mcp_server.py"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = re.search(r'SERVER_INFO\s*=\s*\{[^}]*"version":\s*"([^"]+)"', text)
+    return match.group(1) if match else None
+
+
 def ack_message(msg_id: str, self_info: dict[str, Any] | None = None) -> dict[str, Any]:
     if not re.fullmatch(r"[0-9a-fA-F]{16,64}", msg_id or ""):
         return {"ok": False, "error": "invalid msg_id"}
@@ -2023,7 +2140,18 @@ def ack_message(msg_id: str, self_info: dict[str, Any] | None = None) -> dict[st
         path.rename(target)
         if not _is_under(target.resolve(), INBOX):
             return {"ok": False, "error": "ack target escaped INBOX"}
-        return {"ok": True, "msg_id": msg_id, "moved_to": str(target)}
+        receipt = None
+        if os.environ.get("PEER_BUS_ACK_RECEIPTS", "1").lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }:
+            receipt = _write_ack_receipt(data, me)
+        out: dict[str, Any] = {"ok": True, "msg_id": msg_id, "moved_to": str(target)}
+        if receipt:
+            out["receipt"] = receipt
+        return out
     return {"ok": False, "error": f"msg_id not found in inbox for {me['key']}: {msg_id}"}
 
 
@@ -2151,6 +2279,12 @@ def _cmd_self_test(args: argparse.Namespace) -> int:
     print(json.dumps(out, indent=2))
     if out.get("skipped"):
         return 0
+    return 0 if out.get("ok") else 1
+
+
+def _cmd_doctor(args: argparse.Namespace) -> int:
+    out = doctor()
+    print(json.dumps(out, indent=2))
     return 0 if out.get("ok") else 1
 
 
@@ -2288,6 +2422,12 @@ def main(argv: list[str] | None = None) -> int:
         help="check live multiplexer JSON against the pinned schema (skip if no binary)",
     )
     p.set_defaults(func=_cmd_self_test)
+
+    p = sub.add_parser(
+        "doctor",
+        help="tree health: CLI version, on-disk MCP version, multiplexer, usage dir, pool schema",
+    )
+    p.set_defaults(func=_cmd_doctor)
 
     p = sub.add_parser(
         "prune",

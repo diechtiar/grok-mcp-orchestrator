@@ -2,7 +2,7 @@
 
 Cross-harness **ListAgents / SendMessage** for multi-session agent orchestration.
 
-**Version:** 0.9.9 · **License:** MIT · **Python:** 3.11+ (stdlib only)
+**Version:** 0.10.0 · **License:** MIT · **Python:** 3.11+ (stdlib only)
 
 Claude Code already has native `SendMessage` / `ListAgents`. This project gives **Grok** (and Claude) the same verbs over a small **filesystem bus**, plus a zero-dependency **stdio MCP server**.
 
@@ -14,13 +14,14 @@ Project board: https://github.com/users/diechtiar/projects/4
 
 ## Features
 
-- Discover live peers (`list` / `flock`: tmux pane title + pid, Herdr `agents`, Grok actives with a live pid, usage overlay; registry is not presence). Quota is one `pool` header (`five_hour` and `seven_day`, each with its own reset; `state` live|stale from snapshot age). Per-seat discriminator is `context`.
-- Send / receive / ack messages (**acceptance ≠ delivery**). Recv is newest-first; ack consumes.
+- Discover live peers (`list` / `flock`: tmux pane title + pid, Herdr `agents`, Grok actives with a live pid, usage overlay; registry is not presence). Quota is one `pool` header (`five_hour` and `seven_day`, each with its own reset; `state` live|stale from snapshot age; `schema` integer). Per-seat discriminator is `context`. `bus_version` is on whoami, flock, and each envelope.
+- Send / receive / ack messages (**acceptance ≠ delivery**). Recv is newest-first; ack consumes. Optional sender-side ack receipt (`PEER_BUS_ACK_RECEIPTS=0` to disable).
 - `watch` — inotify on Linux (poll fallback); one line per new unread (`msg_id` + `from.address`)
 - `mail` — unread count, no bodies (statuslines use this)
 - Wake after accept — drop file + optional cmd/callback (never fails send)
 - Claude recipients: native inbox-socket post after accept (`PEER_BUS_CLAUDE_UDS=0` to disable)
 - `self-test` — pin multiplexer JSON (`agent list` / `pane list` / `process-info`)
+- `doctor` — tree health (CLI vs on-disk MCP version, multiplexer, usage dir, pool schema)
 - Playbook: [`docs/playbook.md`](docs/playbook.md)
 - Session-bound inbox keys (not spoofable via display name)
 - Env-agnostic defaults (no host-specific paths baked into the library)
@@ -64,6 +65,7 @@ python3 peer_bus.py watch
 python3 peer_bus.py watch --max-runtime 36000
 
 python3 peer_bus.py self-test   # multiplexer JSON shape; skip if no binary
+python3 peer_bus.py doctor      # tree health JSON; compare bus_version to MCP whoami
 python3 peer_bus.py version
 ```
 
@@ -192,6 +194,7 @@ Expect eight tools and any live peers (or an empty table). If MCP fails to start
 | `$PEER_BUS_ROOT/inbox/<key>/` | Unread messages |
 | `$PEER_BUS_ROOT/registry/` | Heartbeats |
 | `$PEER_BUS_ROOT/wake/<key>.json` | Last-wake marker (best-effort) |
+| `$PEER_BUS_ROOT/receipts/<from-key>/` | Optional sender-side ack receipts |
 | [SECURITY.md](SECURITY.md) | Trust model and mitigations |
 | [ROADMAP.md](ROADMAP.md) | Planned work |
 | [docs/playbook.md](docs/playbook.md) | Worked end-to-end playbook |

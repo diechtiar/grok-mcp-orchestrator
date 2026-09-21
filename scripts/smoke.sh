@@ -11,6 +11,8 @@ trap cleanup EXIT
 
 "${PB[@]}" whoami --as Orchestra >/dev/null
 "${PB[@]}" list >/dev/null
+"${PB[@]}" version | grep -qx '0.10.0'
+"${PB[@]}" doctor >/dev/null
 "${PB[@]}" send --as Orchestra --to Worker --body 'smoke-ping' --summary smoke >/dev/null
 out="$("${PB[@]}" recv --as Worker --json)"
 echo "$out" | python3 -c 'import json,sys; m=json.load(sys.stdin); assert m and m[0]["msg_id"]'

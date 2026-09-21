@@ -100,7 +100,7 @@ class ClaudeSessionIdTests(unittest.TestCase):
         self.assertIsNone(peer_bus._sid_from_grok_argv(["python3", "peer_bus.py", "watch", "--as", "Cora"]))
 
 
-class TempBusTestCase(unittest.TestCase):
+class TempBusMixin:
     def setUp(self) -> None:
         self._tmpdir = tempfile.TemporaryDirectory(prefix="peer-bus-ut-")
         self.root = Path(self._tmpdir.name)
@@ -115,6 +115,7 @@ class TempBusTestCase(unittest.TestCase):
             "INBOX": peer_bus.INBOX,
             "REGISTRY": peer_bus.REGISTRY,
             "WAKE": peer_bus.WAKE,
+            "RECEIPTS": peer_bus.RECEIPTS,
             "TRUST_NAME_KEYS": peer_bus.TRUST_NAME_KEYS,
             "WAKE_DROP": peer_bus.WAKE_DROP,
             "WAKE_ENABLED": peer_bus.WAKE_ENABLED,
@@ -125,6 +126,7 @@ class TempBusTestCase(unittest.TestCase):
         peer_bus.INBOX = peer_bus.ROOT / "inbox"
         peer_bus.REGISTRY = peer_bus.ROOT / "registry"
         peer_bus.WAKE = peer_bus.ROOT / "wake"
+        peer_bus.RECEIPTS = peer_bus.ROOT / "receipts"
         peer_bus.TRUST_NAME_KEYS = True
         peer_bus.WAKE_DROP = True
         peer_bus.WAKE_ENABLED = False
@@ -137,6 +139,8 @@ class TempBusTestCase(unittest.TestCase):
             setattr(peer_bus, name, value)
         self._tmpdir.cleanup()
 
+
+class TempBusTestCase(TempBusMixin, unittest.TestCase):
     def test_send_recv_ack_wake_drop(self) -> None:
         with mock.patch.dict(os.environ, self.env, clear=False):
             sender = peer_bus.detect_self("Orchestra")
@@ -302,6 +306,7 @@ class BodyCapTests(unittest.TestCase):
             peer_bus.INBOX = peer_bus.ROOT / "inbox"
             peer_bus.REGISTRY = peer_bus.ROOT / "registry"
             peer_bus.WAKE = peer_bus.ROOT / "wake"
+            peer_bus.RECEIPTS = peer_bus.ROOT / "receipts"
             peer_bus.TRUST_NAME_KEYS = True
             peer_bus.WAKE_DROP = True
             peer_bus._ensure_dirs()
@@ -326,6 +331,7 @@ class StaleSendTests(unittest.TestCase):
             peer_bus.INBOX = peer_bus.ROOT / "inbox"
             peer_bus.REGISTRY = peer_bus.ROOT / "registry"
             peer_bus.WAKE = peer_bus.ROOT / "wake"
+            peer_bus.RECEIPTS = peer_bus.ROOT / "receipts"
             peer_bus.TRUST_NAME_KEYS = False
             peer_bus.ALLOW_STALE_SEND = False
             peer_bus._ensure_dirs()
@@ -350,12 +356,14 @@ class RosterTests(unittest.TestCase):
             "INBOX": peer_bus.INBOX,
             "REGISTRY": peer_bus.REGISTRY,
             "WAKE": peer_bus.WAKE,
+            "RECEIPTS": peer_bus.RECEIPTS,
             "USAGE_DIR": peer_bus.USAGE_DIR,
         }
         peer_bus.ROOT = self.root.resolve()
         peer_bus.INBOX = peer_bus.ROOT / "inbox"
         peer_bus.REGISTRY = peer_bus.ROOT / "registry"
         peer_bus.WAKE = peer_bus.ROOT / "wake"
+        peer_bus.RECEIPTS = peer_bus.ROOT / "receipts"
         peer_bus.USAGE_DIR = self.root / "usage"
         peer_bus._ensure_dirs()
         peer_bus.USAGE_DIR.mkdir(exist_ok=True)
@@ -812,9 +820,11 @@ class RosterTests(unittest.TestCase):
         self.assertNotIn("five_hour", rows["Ada"])
         self.assertNotIn("five_hour", rows["Gus"])
         self.assertEqual(rows["Ada"]["context"], "16")
+        self.assertEqual(view["bus_version"], peer_bus.PEER_BUS_VERSION)
         self.assertEqual(view["pool"]["five_hour"], "48")
         self.assertEqual(view["pool"]["seven_day"], "61")
         self.assertEqual(view["pool"]["state"], "live")
+        self.assertEqual(view["pool"]["schema"], peer_bus.POOL_SCHEMA)
         self.assertNotIn("five_hour", view["agents"][0])
         self.assertNotIn("seven_day", view["agents"][0])
 
@@ -1014,12 +1024,14 @@ class PruneTests(unittest.TestCase):
             "INBOX": peer_bus.INBOX,
             "REGISTRY": peer_bus.REGISTRY,
             "WAKE": peer_bus.WAKE,
+            "RECEIPTS": peer_bus.RECEIPTS,
             "USAGE_DIR": peer_bus.USAGE_DIR,
         }
         peer_bus.ROOT = self.root.resolve()
         peer_bus.INBOX = peer_bus.ROOT / "inbox"
         peer_bus.REGISTRY = peer_bus.ROOT / "registry"
         peer_bus.WAKE = peer_bus.ROOT / "wake"
+        peer_bus.RECEIPTS = peer_bus.ROOT / "receipts"
         peer_bus.USAGE_DIR = self.root / "usage"
         peer_bus._ensure_dirs()
         peer_bus.USAGE_DIR.mkdir(exist_ok=True)
@@ -1174,6 +1186,7 @@ class ClaudeUdsWakeTests(unittest.TestCase):
             "INBOX": peer_bus.INBOX,
             "REGISTRY": peer_bus.REGISTRY,
             "WAKE": peer_bus.WAKE,
+            "RECEIPTS": peer_bus.RECEIPTS,
             "TRUST_NAME_KEYS": peer_bus.TRUST_NAME_KEYS,
         }
 
@@ -1231,6 +1244,7 @@ class ClaudeUdsWakeTests(unittest.TestCase):
                 peer_bus.INBOX = root / "inbox"
                 peer_bus.REGISTRY = root / "registry"
                 peer_bus.WAKE = root / "wake"
+                peer_bus.RECEIPTS = root / "receipts"
                 with mock.patch.dict(
                     os.environ,
                     {
@@ -1285,6 +1299,7 @@ class ClaudeUdsWakeTests(unittest.TestCase):
                 peer_bus.INBOX = root / "inbox"
                 peer_bus.REGISTRY = root / "registry"
                 peer_bus.WAKE = root / "wake"
+                peer_bus.RECEIPTS = root / "receipts"
                 with mock.patch.object(peer_bus, "list_agents", return_value=[rec]):
                     with mock.patch.object(
                         peer_bus,
@@ -1336,6 +1351,7 @@ class ClaudeUdsWakeTests(unittest.TestCase):
                     peer_bus.INBOX = root / "inbox"
                     peer_bus.REGISTRY = root / "registry"
                     peer_bus.WAKE = root / "wake"
+                    peer_bus.RECEIPTS = root / "receipts"
                     with mock.patch.object(peer_bus, "list_agents", return_value=[rec]):
                         with mock.patch.object(
                             peer_bus,
@@ -1352,6 +1368,140 @@ class ClaudeUdsWakeTests(unittest.TestCase):
         live.assert_not_called()
         methods = [m["method"] for m in (out.get("wake") or {}).get("methods") or []]
         self.assertNotIn("uds", methods)
+
+
+class Contract010Tests(TempBusMixin, unittest.TestCase):
+    def test_whoami_exposes_bus_version(self) -> None:
+        with mock.patch.dict(os.environ, self.env, clear=False):
+            me = peer_bus.detect_self("Ada")
+        self.assertEqual(me["bus_version"], peer_bus.PEER_BUS_VERSION)
+        self.assertEqual(peer_bus.PEER_BUS_VERSION, "0.10.0")
+
+    def test_envelope_carries_bus_version(self) -> None:
+        with mock.patch.dict(os.environ, self.env, clear=False):
+            sender = peer_bus.detect_self("Ada")
+            peer_bus.send_message("Beau", "ping", self_info=sender)
+            msgs = peer_bus.receive_messages(peer_bus.detect_self("Beau"))
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["bus_version"], "0.10.0")
+
+    def test_ack_writes_sender_receipt(self) -> None:
+        with mock.patch.dict(os.environ, self.env, clear=False):
+            sender = peer_bus.detect_self("Ada")
+            sent = peer_bus.send_message("Beau", "ping", self_info=sender)
+            ack = peer_bus.ack_message(sent["msg_id"], peer_bus.detect_self("Beau"))
+        self.assertTrue(ack["ok"])
+        self.assertTrue(ack.get("receipt"))
+        path = Path(ack["receipt"])
+        self.assertTrue(path.is_file(), path)
+        self.assertTrue(str(path).startswith(str(peer_bus.RECEIPTS)))
+        payload = json.loads(path.read_text())
+        self.assertEqual(payload["msg_id"], sent["msg_id"])
+        self.assertEqual(payload["by"]["name"], "Beau")
+        self.assertIn("acked_at", payload)
+
+    def test_ack_skips_receipt_when_disabled(self) -> None:
+        env = dict(self.env)
+        env["PEER_BUS_ACK_RECEIPTS"] = "0"
+        with mock.patch.dict(os.environ, env, clear=False):
+            sender = peer_bus.detect_self("Ada")
+            sent = peer_bus.send_message("Beau", "ping", self_info=sender)
+            ack = peer_bus.ack_message(sent["msg_id"], peer_bus.detect_self("Beau"))
+        self.assertTrue(ack["ok"])
+        self.assertNotIn("receipt", ack)
+        dest = peer_bus.RECEIPTS / peer_bus._safe_key(sender["key"])
+        self.assertFalse((dest / f"{sent['msg_id']}.json").exists())
+
+    def test_doctor_ok_with_skips(self) -> None:
+        saved = peer_bus.USAGE_DIR
+        peer_bus.USAGE_DIR = None
+        try:
+            with mock.patch.object(
+                peer_bus, "herdr_self_test", return_value={"ok": True, "skipped": True}
+            ):
+                with mock.patch.object(peer_bus, "pool_usage", return_value=None):
+                    out = peer_bus.doctor()
+        finally:
+            peer_bus.USAGE_DIR = saved
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["bus_version"], "0.10.0")
+        names = {c["name"]: c for c in out["checks"]}
+        self.assertTrue(names["cli_version"]["ok"])
+        self.assertEqual(names["cli_version"]["detail"], "0.10.0")
+        self.assertTrue(names["herdr"].get("skipped"))
+        self.assertTrue(names["usage_dir"].get("skipped"))
+        self.assertTrue(names["pool_schema"].get("skipped"))
+        self.assertTrue(names["mcp_version"]["ok"])
+        self.assertEqual(names["mcp_version"]["detail"], "0.10.0")
+
+    def test_doctor_fails_on_pool_schema_mismatch(self) -> None:
+        saved = peer_bus.USAGE_DIR
+        peer_bus.USAGE_DIR = self.root / "usage"
+        peer_bus.USAGE_DIR.mkdir(exist_ok=True)
+        try:
+            with mock.patch.object(
+                peer_bus, "herdr_self_test", return_value={"ok": True, "skipped": True}
+            ):
+                with mock.patch.object(
+                    peer_bus, "pool_usage", return_value={"schema": 1, "state": "live"}
+                ):
+                    out = peer_bus.doctor()
+        finally:
+            peer_bus.USAGE_DIR = saved
+        self.assertFalse(out["ok"])
+        pool = next(c for c in out["checks"] if c["name"] == "pool_schema")
+        self.assertFalse(pool["ok"])
+        self.assertIn("1", pool["detail"])
+
+    def test_doctor_fails_on_missing_usage_dir(self) -> None:
+        saved = peer_bus.USAGE_DIR
+        peer_bus.USAGE_DIR = self.root / "no-such-usage"
+        try:
+            with mock.patch.object(
+                peer_bus, "herdr_self_test", return_value={"ok": True, "skipped": True}
+            ):
+                with mock.patch.object(peer_bus, "pool_usage", return_value=None):
+                    out = peer_bus.doctor()
+        finally:
+            peer_bus.USAGE_DIR = saved
+        self.assertFalse(out["ok"])
+        usage = next(c for c in out["checks"] if c["name"] == "usage_dir")
+        self.assertFalse(usage["ok"])
+
+    def test_cli_doctor_json(self) -> None:
+        env = os.environ.copy()
+        env.update(self.env)
+        env.pop("PEER_BUS_USAGE_DIR", None)
+        env.pop("USAGE_DIR", None)
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "peer_bus.py"), "doctor"],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+        payload = json.loads(proc.stdout)
+        self.assertEqual(payload["bus_version"], "0.10.0")
+        self.assertIn("checks", payload)
+        self.assertEqual(proc.returncode, 0 if payload["ok"] else 1)
+
+    def test_mcp_initialize_version(self) -> None:
+        env = os.environ.copy()
+        env.update({"PEER_BUS_ROOT": str(self.root)})
+        env.pop("PEER_BUS_TRUST_NAME_KEYS", None)
+        proc = subprocess.run(
+            [sys.executable, str(ROOT / "mcp_server.py")],
+            input='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n',
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+        self.assertEqual(proc.returncode, 0)
+        payload = json.loads(proc.stdout.splitlines()[0])
+        self.assertEqual(payload["result"]["serverInfo"]["version"], "0.10.0")
 
 
 if __name__ == "__main__":

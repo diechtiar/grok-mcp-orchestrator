@@ -35,9 +35,11 @@ python3 /path/to/peer_bus.py watch --max-runtime 36000
 python3 /path/to/peer_bus.py prune           # dead registry/usage/empty-inbox (dry-run)
 python3 /path/to/peer_bus.py prune --apply
 python3 /path/to/peer_bus.py self-test
+python3 /path/to/peer_bus.py doctor          # tree health JSON (not a live MCP pid)
+python3 /path/to/peer_bus.py version
 ```
 
-Live names come from **Herdr** first (session `agents` by default), then tmux if `PEER_BUS_TMUX=1`. A work tracker is not presence. Always address `Name [ref]` from `flock`. `--as` / display_name only change from.name. Acceptance is not receipt: `ack` moves the inbox file.
+Live names come from **Herdr** first (session `agents` by default), then tmux if `PEER_BUS_TMUX=1`. A work tracker is not presence. Always address `Name [ref]` from `flock`. `--as` / display_name only change from.name. Acceptance is not receipt: `ack` moves the inbox file. `whoami` / `flock` / envelopes carry `bus_version`; `pool.schema` is an integer. Compare MCP `whoami.bus_version` to CLI `peer-bus version` — a mismatch means reconnect MCP. Ack may write a sender-side receipt (`PEER_BUS_ACK_RECEIPTS=0` to disable); that file is not proof of understanding.
 
 MCP `send_message`: pass only `to` and `body`. Extra fields have made some hosts drop `to`. Long-running `watch` should set `--max-runtime` if the host kills unbounded monitors.
 

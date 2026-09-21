@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.0 — 2026-09-21
+
+- `bus_version` is on `whoami`, `flock`/`list_agents`, and each message envelope.
+  Compare MCP `whoami.bus_version` to CLI `peer-bus version` — a mismatch means
+  the stdio process predates the tree on disk.
+- `pool.schema` is an integer (`2` = `five_hour` + `seven_day` + `state`/`age_min`).
+- `peer-bus doctor` reports CLI version, on-disk MCP `SERVER_INFO`, multiplexer
+  schema, usage dir, and pool schema. It does not inspect a live MCP pid.
+- Ack writes an optional sender-side receipt under `$PEER_BUS_ROOT/receipts/<from-key>/`.
+  Opt out with `PEER_BUS_ACK_RECEIPTS=0`. A receipt is not proof of understanding.
+
 ## 0.9.9 — 2026-09-20
 
 - `pool` includes `seven_day` / `seven_day_resets_at` beside `five_hour`. Each
