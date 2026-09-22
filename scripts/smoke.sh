@@ -11,7 +11,7 @@ trap cleanup EXIT
 
 "${PB[@]}" whoami --as Orchestra >/dev/null
 "${PB[@]}" list >/dev/null
-"${PB[@]}" version | grep -qx '0.11.1'
+"${PB[@]}" version | grep -qx '0.11.2'
 "${PB[@]}" doctor >/dev/null
 "${PB[@]}" send --as Orchestra --to Worker --body 'smoke-ping' --summary smoke >/dev/null
 out="$("${PB[@]}" recv --as Worker --json)"

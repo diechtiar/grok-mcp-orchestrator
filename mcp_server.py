@@ -17,7 +17,7 @@ from typing import Any
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
 import peer_bus  # noqa: E402
 
-SERVER_INFO = {"name": "peer-bus", "version": "0.11.1"}
+SERVER_INFO = {"name": "peer-bus", "version": "0.11.2"}
 PROTOCOL_VERSION = "2024-11-05"
 
 TOOLS = [
@@ -39,7 +39,7 @@ TOOLS = [
     },
     {
         "name": "send_message",
-        "description": "Send to a live peer inbox (acceptance only). Pass only to (Name [ref] from flock) and body. Do not pass display_name or summary — extra fields have made the host drop to. warning means a fresh heartbeat key disagrees with the addressed inbox; ok is still file-written.",
+        "description": "Send to a live pane only (herdr, tmux, or grok). Pass only to (Name [ref] from flock) and body. A usage or registry row is refused and nothing is written. Do not pass display_name or summary — extra fields have made the host drop to. ok means the file was written. delivered_to_reader true means the Claude socket took a copy. warning means a fresh heartbeat key disagrees with the address.",
         "inputSchema": {
             "type": "object",
             "properties": {

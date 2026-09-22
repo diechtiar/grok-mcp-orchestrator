@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.2 — 2026-09-22
+
+- `send` to a usage or registry row is refused and nothing is written.
+  The error names the live pane when one exists. A bare name that matches
+  more than one live pane stays ambiguous.
+- MCP `send_message` describes `delivered_to_reader`: true means the Claude
+  socket took a copy.
+
 ## 0.11.1 — 2026-09-22
 
 - A successful Claude socket delivery moves the inbox file to `read/`

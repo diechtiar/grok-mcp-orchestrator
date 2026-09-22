@@ -48,7 +48,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-PEER_BUS_VERSION = "0.11.1"
+PEER_BUS_VERSION = "0.11.2"
 # pool.schema: 1 = five_hour only; 2 = five_hour + seven_day + state/age_min
 POOL_SCHEMA = 2
 
@@ -1834,7 +1834,31 @@ def resolve_recipient(
 
     chosen = dict(chosen)
     chosen["key"] = _safe_key(str(chosen.get("session_id") or chosen.get("key")))
-    return chosen
+    return _require_live_reader(chosen, pool, stale_ok)
+
+
+_READER_SOURCES = frozenset({"herdr", "tmux", "grok"})
+
+
+def _require_live_reader(
+    chosen: dict[str, Any], pool: list[dict[str, Any]], stale_ok: bool
+) -> dict[str, Any]:
+    """A usage or registry row is not an inbox anyone reads."""
+    src = chosen.get("source")
+    if stale_ok or src in _READER_SOURCES or not src:
+        return chosen
+    name = chosen.get("name")
+    live = [
+        str(a.get("address") or a.get("name"))
+        for a in pool
+        if a.get("name") == name
+        and a.get("source") in _READER_SOURCES
+        and a.get("state") != "stale"
+    ]
+    hint = f" Live: {', '.join(live)}." if live else " No live pane for that name."
+    raise ValueError(
+        f"recipient {chosen.get('address') or name!r} is {src}, not a live pane.{hint} Not sent."
+    )
 
 
 _TO_ALIASES = ("to", "recipient", "address")

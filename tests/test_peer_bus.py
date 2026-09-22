@@ -786,6 +786,38 @@ class RosterTests(unittest.TestCase):
         self.assertEqual([r["session_id"] for r in live], [pane_sid])
         self.assertEqual(live[0]["source"], "herdr")
 
+    def test_resolve_refuses_usage_row_when_a_live_pane_exists(self) -> None:
+        dead = "c118a112-aea5-4396-93dc-51bd9516250f"
+        live = "01a08225-0f17-7553-b0c8-2fe76f42e12e"
+        rows = [
+            {
+                "name": "Conan",
+                "session_id": dead,
+                "key": dead,
+                "source": "usage",
+                "state": "live",
+                "address": "Conan [c118a1]",
+            },
+            {
+                "name": "Conan",
+                "session_id": live,
+                "key": live,
+                "source": "herdr",
+                "state": "live",
+                "address": "Conan [01a08225-0]",
+            },
+        ]
+        with self.assertRaises(ValueError) as ctx:
+            peer_bus.resolve_recipient("Conan", agents=rows)
+        self.assertIn("ambiguous", str(ctx.exception))
+        with self.assertRaises(ValueError) as dead_ctx:
+            peer_bus.resolve_recipient("Conan [c118a1]", agents=rows)
+        msg = str(dead_ctx.exception)
+        self.assertIn("not a live pane", msg)
+        self.assertIn("Conan [01a08225-0]", msg)
+        chosen = peer_bus.resolve_recipient("Conan [01a08225-0]", agents=rows)
+        self.assertEqual(chosen["session_id"], live)
+
     def test_usage_only_seat_still_listed(self) -> None:
         sid = "c662b3ea-d616-4c37-8a78-74ae8272b578"
         usage = [self._usage_row("Ada", sid, age=0.3, context="16")]
@@ -1752,7 +1784,7 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
         with mock.patch.dict(os.environ, self.env, clear=False):
             me = peer_bus.detect_self("Ada")
         self.assertEqual(me["bus_version"], peer_bus.PEER_BUS_VERSION)
-        self.assertEqual(peer_bus.PEER_BUS_VERSION, "0.11.1")
+        self.assertEqual(peer_bus.PEER_BUS_VERSION, "0.11.2")
 
     def test_envelope_carries_bus_version(self) -> None:
         with mock.patch.dict(os.environ, self.env, clear=False):
@@ -1760,7 +1792,7 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
             peer_bus.send_message("Beau", "ping", self_info=sender)
             msgs = peer_bus.receive_messages(peer_bus.detect_self("Beau"))
         self.assertEqual(len(msgs), 1)
-        self.assertEqual(msgs[0]["bus_version"], "0.11.1")
+        self.assertEqual(msgs[0]["bus_version"], "0.11.2")
 
     def test_ack_writes_sender_receipt(self) -> None:
         with mock.patch.dict(os.environ, self.env, clear=False):
@@ -1801,15 +1833,15 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
         finally:
             peer_bus.USAGE_DIR = saved
         self.assertTrue(out["ok"])
-        self.assertEqual(out["bus_version"], "0.11.1")
+        self.assertEqual(out["bus_version"], "0.11.2")
         names = {c["name"]: c for c in out["checks"]}
         self.assertTrue(names["cli_version"]["ok"])
-        self.assertEqual(names["cli_version"]["detail"], "0.11.1")
+        self.assertEqual(names["cli_version"]["detail"], "0.11.2")
         self.assertTrue(names["herdr"].get("skipped"))
         self.assertTrue(names["usage_dir"].get("skipped"))
         self.assertTrue(names["pool_schema"].get("skipped"))
         self.assertTrue(names["mcp_version"]["ok"])
-        self.assertEqual(names["mcp_version"]["detail"], "0.11.1")
+        self.assertEqual(names["mcp_version"]["detail"], "0.11.2")
 
     def test_doctor_fails_on_pool_schema_mismatch(self) -> None:
         saved = peer_bus.USAGE_DIR
@@ -1859,7 +1891,7 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
             check=False,
         )
         payload = json.loads(proc.stdout)
-        self.assertEqual(payload["bus_version"], "0.11.1")
+        self.assertEqual(payload["bus_version"], "0.11.2")
         self.assertIn("checks", payload)
         self.assertEqual(proc.returncode, 0 if payload["ok"] else 1)
 
@@ -1878,7 +1910,7 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0)
         payload = json.loads(proc.stdout.splitlines()[0])
-        self.assertEqual(payload["result"]["serverInfo"]["version"], "0.11.1")
+        self.assertEqual(payload["result"]["serverInfo"]["version"], "0.11.2")
 
 
 if __name__ == "__main__":
