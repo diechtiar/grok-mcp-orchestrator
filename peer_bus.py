@@ -48,7 +48,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-PEER_BUS_VERSION = "0.11.0"
+PEER_BUS_VERSION = "0.11.1"
 # pool.schema: 1 = five_hour only; 2 = five_hour + seven_day + state/age_min
 POOL_SCHEMA = 2
 
@@ -226,6 +226,33 @@ def send_claude_uds(
     return {"ok": True, "msg_id": msg_id, "socket": sock_path}
 
 
+def _archive_uds_delivery(path_str: str) -> None:
+    """Move the inbox file to read/ after the Claude socket accepted it.
+
+    The conversation already has the text. Leaving the file unread makes
+    mail_count a pile of duplicates. A failed move leaves the file unread.
+    """
+    if not path_str:
+        return
+    path = Path(path_str)
+    try:
+        if not path.is_file() or path.is_symlink():
+            return
+        if not _is_under(path.resolve(), INBOX):
+            return
+        data = _read_json(path) or {}
+        data["read"] = True
+        data["delivered_via"] = "uds"
+        data["delivered_at"] = _now()
+        read_dir = path.parent / "read"
+        read_dir.mkdir(exist_ok=True)
+        target = read_dir / path.name
+        path.write_text(json.dumps(data, indent=2) + "\n")
+        path.rename(target)
+    except OSError:
+        return
+
+
 def _try_wake(envelope: dict[str, Any], recipient: dict[str, Any]) -> dict[str, Any]:
     """Best-effort peer wake after inbox accept. Never raises; never undoes acceptance."""
     out: dict[str, Any] = {"attempted": False, "ok": None, "methods": [], "error": None}
@@ -283,6 +310,7 @@ def _try_wake(envelope: dict[str, Any], recipient: dict[str, Any]) -> dict[str, 
                     token=hit.get("token"),
                     from_name=str((envelope.get("from") or {}).get("address") or "peer-bus"),
                 )
+                _archive_uds_delivery(str(envelope.get("_path") or ""))
                 _mark("uds", True)
             else:
                 _mark("uds", False, "no live inbox socket")
@@ -869,8 +897,13 @@ def _sid_from_herdr_process_info(payload: Any) -> tuple[str | None, str | None, 
                         pid_i = None
                     if arg == "attach":
                         for job in _claude_bg_jobs():
+                            jid = str(job.get("job_id") or "")
                             js = str(job.get("session_id") or "")
-                            if js == cand or js.startswith(cand) or cand.startswith(js[:8]):
+                            job_hit = bool(jid) and (
+                                jid == cand or jid.startswith(cand) or cand.startswith(jid[:8])
+                            )
+                            sess_hit = bool(js) and (js == cand or js.startswith(cand))
+                            if (job_hit or sess_hit) and js:
                                 return js, "claude", pid_i
                     return cand, harness, pid_i
         pid = proc.get("pid")
@@ -915,7 +948,15 @@ def _parse_claude_bg_jobs(payload: Any) -> list[dict[str, Any]]:
             pid_i = int(pid) if pid is not None else None
         except (TypeError, ValueError):
             pid_i = None
-        out.append({"name": name, "session_id": str(sid), "pid": pid_i, "kind": item.get("kind")})
+        out.append(
+            {
+                "name": name,
+                "session_id": str(sid),
+                "job_id": str(item.get("id") or ""),
+                "pid": pid_i,
+                "kind": item.get("kind"),
+            }
+        )
     return out
 
 
@@ -1908,11 +1949,14 @@ def send_message(
     envelope["_path"] = str(path)
     wake = _try_wake(envelope, recipient)
     envelope.pop("_path", None)
+    delivered = any(
+        m.get("method") == "uds" and m.get("ok") for m in (wake.get("methods") or [])
+    )
 
     return {
         "ok": True,
         "accepted": True,
-        "delivered_to_reader": False,
+        "delivered_to_reader": delivered,
         "msg_id": msg_id,
         "path": str(path),
         "to": envelope["to"],

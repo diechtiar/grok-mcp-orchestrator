@@ -598,6 +598,35 @@ class RosterTests(unittest.TestCase):
         self.assertEqual(harness, "claude")
         self.assertEqual(pid, 22)
 
+    def test_attach_job_id_is_not_the_session_id(self) -> None:
+        payload = {
+            "result": {
+                "process_info": {
+                    "foreground_processes": [
+                        {
+                            "argv": ["claude", "attach", "9e7e13c3"],
+                            "name": "claude",
+                            "pid": 33,
+                        }
+                    ],
+                    "shell_pid": 33,
+                }
+            }
+        }
+        jobs = [
+            {
+                "name": "Ada",
+                "job_id": "9e7e13c3",
+                "session_id": "9a8ec307-a1d1-446e-8ab6-7a27b578efba",
+                "pid": 240112,
+            }
+        ]
+        with mock.patch.object(peer_bus, "_claude_bg_jobs", return_value=jobs):
+            sid, harness, pid = peer_bus._sid_from_herdr_process_info(payload)
+        self.assertEqual(sid, "9a8ec307-a1d1-446e-8ab6-7a27b578efba")
+        self.assertEqual(harness, "claude")
+        self.assertEqual(pid, 33)
+
     def test_herdr_live_beats_stale_usage_same_sid(self) -> None:
         sid = "804be46b-ff20-4136-83f4-75d62912df53"
         seat = {
@@ -1622,6 +1651,14 @@ class ClaudeUdsWakeTests(unittest.TestCase):
             self.assertIn("auth", blob)
             methods = [m["method"] for m in (out.get("wake") or {}).get("methods") or []]
             self.assertIn("uds", methods)
+            self.assertTrue(out.get("delivered_to_reader"))
+            unread = list((root / "inbox" / sid).glob("*.json"))
+            self.assertEqual(unread, [])
+            archived = list((root / "inbox" / sid / "read").glob("*.json"))
+            self.assertEqual(len(archived), 1)
+            stored = json.loads(archived[0].read_text())
+            self.assertEqual(stored.get("delivered_via"), "uds")
+            self.assertTrue(stored.get("read"))
 
     def test_uds_failure_does_not_fail_send(self) -> None:
         with tempfile.TemporaryDirectory(prefix="peer-bus-uds-fail-") as tmp:
@@ -1715,7 +1752,7 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
         with mock.patch.dict(os.environ, self.env, clear=False):
             me = peer_bus.detect_self("Ada")
         self.assertEqual(me["bus_version"], peer_bus.PEER_BUS_VERSION)
-        self.assertEqual(peer_bus.PEER_BUS_VERSION, "0.11.0")
+        self.assertEqual(peer_bus.PEER_BUS_VERSION, "0.11.1")
 
     def test_envelope_carries_bus_version(self) -> None:
         with mock.patch.dict(os.environ, self.env, clear=False):
@@ -1723,7 +1760,7 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
             peer_bus.send_message("Beau", "ping", self_info=sender)
             msgs = peer_bus.receive_messages(peer_bus.detect_self("Beau"))
         self.assertEqual(len(msgs), 1)
-        self.assertEqual(msgs[0]["bus_version"], "0.11.0")
+        self.assertEqual(msgs[0]["bus_version"], "0.11.1")
 
     def test_ack_writes_sender_receipt(self) -> None:
         with mock.patch.dict(os.environ, self.env, clear=False):
@@ -1764,15 +1801,15 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
         finally:
             peer_bus.USAGE_DIR = saved
         self.assertTrue(out["ok"])
-        self.assertEqual(out["bus_version"], "0.11.0")
+        self.assertEqual(out["bus_version"], "0.11.1")
         names = {c["name"]: c for c in out["checks"]}
         self.assertTrue(names["cli_version"]["ok"])
-        self.assertEqual(names["cli_version"]["detail"], "0.11.0")
+        self.assertEqual(names["cli_version"]["detail"], "0.11.1")
         self.assertTrue(names["herdr"].get("skipped"))
         self.assertTrue(names["usage_dir"].get("skipped"))
         self.assertTrue(names["pool_schema"].get("skipped"))
         self.assertTrue(names["mcp_version"]["ok"])
-        self.assertEqual(names["mcp_version"]["detail"], "0.11.0")
+        self.assertEqual(names["mcp_version"]["detail"], "0.11.1")
 
     def test_doctor_fails_on_pool_schema_mismatch(self) -> None:
         saved = peer_bus.USAGE_DIR
@@ -1822,7 +1859,7 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
             check=False,
         )
         payload = json.loads(proc.stdout)
-        self.assertEqual(payload["bus_version"], "0.11.0")
+        self.assertEqual(payload["bus_version"], "0.11.1")
         self.assertIn("checks", payload)
         self.assertEqual(proc.returncode, 0 if payload["ok"] else 1)
 
@@ -1841,7 +1878,7 @@ class Contract010Tests(TempBusMixin, unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0)
         payload = json.loads(proc.stdout.splitlines()[0])
-        self.assertEqual(payload["result"]["serverInfo"]["version"], "0.11.0")
+        self.assertEqual(payload["result"]["serverInfo"]["version"], "0.11.1")
 
 
 if __name__ == "__main__":

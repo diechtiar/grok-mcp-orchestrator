@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.1 — 2026-09-22
+
+- A successful Claude socket delivery moves the inbox file to `read/`
+  (`delivered_via: uds`). `mail_count` no longer counts that duplicate.
+  A failed socket leaves the file unread. Grok drop-wake is unchanged.
+- `claude attach <job-id>` resolves to that job's session id, not the job id.
+
 ## 0.11.0 — 2026-09-21
 
 - Heartbeat registry payload includes `bus_version`. Flock overlays it onto the
