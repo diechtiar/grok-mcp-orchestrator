@@ -2,12 +2,15 @@
 
 Tracked on the [GitHub Project](https://github.com/users/diechtiar/projects/4).
 
-## Current (v0.11.0)
+## Current (v0.11.2)
 
 Stdlib CLI + stdio MCP. Live roster (Herdr, optional tmux, Grok pids, usage overlay).
 Send/recv/ack with session-bound keys. `watch` (inotify; `--max-runtime`). `mail`. `prune`.
 `bus_version` on whoami/flock/envelopes/heartbeat; `pool.schema`; `doctor`; optional ack receipts.
 Fresh heartbeat rebinds the live row to the inbox MCP recv reads; `send` warns on leftover mismatch.
+A usage or registry row is not a reader: `send` refuses it and writes nothing.
+A successful Claude socket delivery moves that inbox file to `read/`. `delivered_to_reader`
+means the socket took the copy. `claude attach <job-id>` resolves to that job's session id.
 Acceptance is not delivery. Same-UID cooperative bus — see [SECURITY.md](SECURITY.md).
 
 ## Next
@@ -43,3 +46,5 @@ Acceptance is not delivery. Same-UID cooperative bus — see [SECURITY.md](SECUR
 - [x] `bus_version` on payloads, `pool.schema`, `doctor`, optional ack receipts — **v0.10.0**
 - [x] Usage ghosts off the default flock; Herdr row rebinds to the session-bound usage sid — **v0.10.1**
 - [x] Heartbeat `bus_version`; fresh heartbeat is the reader key; send warns on leftover mismatch — **v0.11.0**
+- [x] Successful Claude socket delivery archives the inbox file; attach job id resolves to the session id — **v0.11.1**
+- [x] Send to a usage or registry row is refused; `delivered_to_reader` is the Claude socket — **v0.11.2**
